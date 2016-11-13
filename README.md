@@ -1,6 +1,6 @@
 # coding-samples-and-experiments
 
-This is a small sampling of code that I wrote, extended, ported, or just played around with while volunteering as a CTA for the Fundamentals of Computing specialization on Coursera. These programs are meant to be used with Codeskulptor and can be run using the following links (press the triangle button at top left of associated page to run). In this sampling, there are no course projects, samples of proprietary code I've written for clients, or programs written in languages other than Python. This is only to illustrate a basic knowledge of Python (and perhaps C++ as a few of these are ports of other people's work).
+This is a small sampling of code that I wrote, extended, ported, or just played around with while volunteering as a CTA for the Fundamentals of Computing specialization on Coursera. These programs are meant to be used with Codeskulptor and can be run using the following links (press the triangle button at top left of associated page to run). In this sampling, there are no course projects, samples of my professional work, or programs written in languages other than Python. This is only to illustrate a basic knowledge of Python and programming (and perhaps C++ as a few of these are ports of other people's work).
 
 <hr>
 <pre># CodeSkulptor runs Python programs in your browser.
