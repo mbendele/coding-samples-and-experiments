@@ -13,7 +13,6 @@ These programs are meant to be used with Codeskulptor and can be run using the l
 # full functionality.  It does NOT run in Internet Explorer.</pre>
 <hr>
 
-GA_15-puzzle_solver: Not completely automated and loops indefinitely so not including CS file. <br>
 arc_parabolic: http://www.codeskulptor.org/#user42_asRhgv2HN03AooR_1.py <br>
 buckland_soccer: http://www.codeskulptor.org/#save2_gRbEQJq0iE.py <br>
 drawing_app: http://www.codeskulptor.org/#user40_ZeCRyr5sXBvYZEe_5.py <br>
