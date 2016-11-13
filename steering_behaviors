@@ -1,0 +1,1152 @@
+"""
+This was derived from exercises in steering behaviors from Mat Buckland's book "Programming Game Ai by Example".
+Much of this was a port of examples that were given in C++. Various tweaks were made as I toyed with the code.
+Comments were removed to get this file under the service limit needed for Codeskulptor.
+
+"""
+
+import math
+import random
+import simplegui
+import time
+import codeskulptor
+
+from user25_5GdDkoOxxw_0 import *
+
+SCW = 700
+SCH = 600
+NUM_AGENTS 					= 5
+NUM_OBSTACLES 				= 5
+MIN_OBSTACLE_RADIUS			= 20
+MAX_OBSTACLE_RADIUS			= 80
+NUM_CELLS_X 				= 7
+NUM_CELLS_Y 				= 6
+NUM_SAMP_FOR_SMOOTHING 		= 2
+STEERING_FORCE_TWEAKER 		= 200.0
+STEERING_FORCE 				= 2.0
+MAX_SPEED 					= 150.0
+VEHICLE_MASS 				= 1.0
+VEHICLE_SCALE 				= 5.0
+SEPARATION_WEIGHT 			= 6.0#1.0
+ALIGNMENT_WEIGHT 			= 6.0#1.0
+COHESION_WEIGHT 			= 1.5#2.0
+OBSTACLE_AVOIDANCE_WT 		= 5.0#10.0
+WALL_AVOIDANCE_WEIGHT 		= 10.0#10.0
+WANDER_WEIGHT 				= 0.5#1.0
+SEEK_WEIGHT 				= 1.0
+FLEE_WEIGHT 				= 1.0
+ARRIVE_WEIGHT 				= 1.0
+PURSUIT_WEIGHT  			= 1.0
+OFFSET_PURSUIT_WEIGHT 		= 1.0
+INTERPOSE_WEIGHT 			= 1.0
+HIDE_WEIGHT 				= 1.0
+EVADE_WEIGHT 				= 1.0#0.01
+FOLLOW_PATH_WEIGHT 			= 1.0#0.05
+VIEW_DISTANCE  				= 50.0
+MIN_DETECTION_BOX_LEN  		= 40.0
+WALL_DETECTION_FEELER_LEN 	= 45.0#40.0
+PR_WALL_AVOIDANCE 			= 0.5
+PR_OBSTACLE_AVOIDANCE  		= 0.5
+PR_SEPARATION  				= 0.2
+PR_ALIGNMENT  				= 0.3
+PR_COHESION  				= 0.6
+PR_WANDER  					= 0.8
+PR_SEEK  					= 0.8
+PR_FLEE  					= 0.6
+PR_EVADE  					= 1.0
+PR_HIDE  					= 0.8
+PR_ARRIVE  					= 0.5
+class ParamLoader:
+    def __init__(self):
+        self.num_agents = NUM_AGENTS
+        self.num_obstacles = NUM_OBSTACLES
+        self.min_obstacle_radius = MIN_OBSTACLE_RADIUS
+        self.max_obstacle_radius = MAX_OBSTACLE_RADIUS
+        self.num_cells_x = NUM_CELLS_X
+        self.num_cells_y = NUM_CELLS_Y
+        self.num_samples_for_smoothing = NUM_SAMP_FOR_SMOOTHING
+        self.steering_force_tweaker = STEERING_FORCE_TWEAKER
+        self.max_steering_force = STEERING_FORCE * self.steering_force_tweaker
+        self.max_speed = MAX_SPEED
+        self.vehicle_mass = VEHICLE_MASS
+        self.vehicle_scale = VEHICLE_SCALE
+        self.separation_weight = SEPARATION_WEIGHT * self.steering_force_tweaker
+        self.alignment_weight = ALIGNMENT_WEIGHT * self.steering_force_tweaker
+        self.cohesion_weight = COHESION_WEIGHT * self.steering_force_tweaker
+        self.obstacle_avoidance_weight = OBSTACLE_AVOIDANCE_WT * self.steering_force_tweaker
+        self.wall_avoidance_weight = WALL_AVOIDANCE_WEIGHT * self.steering_force_tweaker
+        self.wander_weight = WANDER_WEIGHT * self.steering_force_tweaker
+        self.seek_weight = SEEK_WEIGHT * self.steering_force_tweaker
+        self.flee_weight = FLEE_WEIGHT * self.steering_force_tweaker
+        self.arrive_weight = ARRIVE_WEIGHT * self.steering_force_tweaker
+        self.pursuit_weight = PURSUIT_WEIGHT * self.steering_force_tweaker
+        self.offset_pursuit_weight = OFFSET_PURSUIT_WEIGHT * self.steering_force_tweaker
+        self.interpose_weight = INTERPOSE_WEIGHT * self.steering_force_tweaker
+        self.hide_weight = HIDE_WEIGHT * self.steering_force_tweaker
+        self.evade_weight = EVADE_WEIGHT * self.steering_force_tweaker
+        self.follow_path_weight = FOLLOW_PATH_WEIGHT * self.steering_force_tweaker
+        self.view_distance = VIEW_DISTANCE
+        self.min_detection_box_length = MIN_DETECTION_BOX_LEN
+        self.wall_detection_feeler_length = WALL_DETECTION_FEELER_LEN
+        self.pr_wall_avoidance = PR_WALL_AVOIDANCE
+        self.pr_obstacle_avoidance = PR_OBSTACLE_AVOIDANCE
+        self.pr_separation = PR_SEPARATION
+        self.pr_alignment = PR_ALIGNMENT
+        self.pr_cohesion = PR_COHESION
+        self.pr_wander = PR_WANDER
+        self.pr_seek = PR_SEEK
+        self.pr_flee = PR_FLEE
+        self.pr_evade = PR_EVADE
+        self.pr_hide = PR_HIDE
+        self.pr_arrive = PR_ARRIVE
+        self.max_turn_rate_per_second = math.pi/2.0#math.pi
+class Smoother:
+    def __init__(self, samp_size, zero_val):
+        self.history = []
+        self.next_update_slot = 0
+        self.zero_value = zero_val
+        self.sample_size = samp_size
+    def update(self, most_recent_value):
+        if len(self.history) < self.sample_size:
+            self.history.append(most_recent_value)
+        else:
+            self.history[self.next_update_slot] = most_recent_value
+        self.next_update_slot = (self.next_update_slot+1) % self.sample_size
+        if isinstance(self.zero_value, type(Vec2D())):
+            tot = Vec2D()
+        else:
+            tot = self.zero_value
+        for i in self.history:
+            tot+=i
+        return tot / float(len(self.history))        
+class Cell:
+    def __init__(self, topleft, botright):
+        self.members = []
+        self.bounding_box = [topleft, [botright[0], topleft[1]] , botright, [topleft[0], botright[1]]]
+    def isOverlappedWith(self, other):
+        return not ((other[0][1] > self.bounding_box[2][1]) or	# top
+                    (other[1][1] < self.bounding_box[0][1]) or	# bottom
+                    (other[0][0] > self.bounding_box[2][0]) or	# left
+                    (other[1][0] < self.bounding_box[0][0]))	# right
+class CellSpacePartition:
+    def __init__(self, width, height, cells_x, cells_y, max_entitys):
+        self.cells = []
+        self.neighbors = []
+        self.space_width = width
+        self.space_height = height
+        self.num_cells_x = cells_x
+        self.num_cells_y = cells_y
+        self.cell_size_x = width / cells_x
+        self.cell_size_y = height / cells_y
+        for y in xrange(self.num_cells_y):
+            for x in xrange(self.num_cells_x):
+                left  = x * self.cell_size_x
+                right = left + self.cell_size_x
+                top   = y * self.cell_size_y
+                bot   = top + self.cell_size_y
+                self.cells.append(Cell([left, top], [right, bot]))
+    def calculate_neighbors(self, target_pos, query_radius):
+        query_box = [ (target_pos - Vec2D(query_radius, query_radius)).value(), 
+                     (target_pos + Vec2D(query_radius, query_radius)).value() ]
+        for cur_cell in self.cells:
+            if cur_cell.isOverlappedWith(query_box) and cur_cell.members:
+                for it in cur_cell.members:
+                    if distance_sq_Vec2D(it.position, target_pos) < query_radius*query_radius:
+                        self.neighbors.append(it) 
+    def empty_cells(self):
+        for c in self.cells:
+            c.members = []
+    def position_to_index(self, pos):
+        idx = int(self.num_cells_x * pos.x / self.space_width) + (int(self.num_cells_y * pos.y / self.space_height) * self.num_cells_x)
+        if idx > len(self.cells)-1: idx = len(self.cells)-1
+        return idx
+    def add_entity(self, ent):
+        assert (ent)
+        sz = len(self.cells)
+        idx = self.position_to_index(ent.position)
+        self.cells[idx].members.append(ent)
+    def update_entity(self, ent, old_pos):
+        old_idx = self.position_to_index(old_pos)
+        new_idx = self.position_to_index(ent.position)  
+        if (new_idx == old_idx): return
+        self.cells[old_idx].members.pop(ent)
+        self.cells[new_idx].members.append(ent)
+    def draw(self, canvas):
+        for cur_cell in self.cells:
+            canvas.draw_polygon(cur_cell.bounding_box, 1, 'Grey')
+class Path:
+    def __init__(self, num_waypoints=0, min_x=0, min_y=0, max_x=0, max_y=0, loop=False):       
+        self.waypoints = []
+        self.cur_waypoint = 0
+        self.looped = loop
+        self.line_width = 1
+        if num_waypoints==min_x==min_y==max_x==max_y==0:
+            return self.waypoints
+        else:
+            self.createRandomPath(num_waypoints, min_x, min_y, max_x, max_y)
+    def addWayPoint(self, new_point):
+        self.waypoints.append(new_point)
+    def get_cur_waypoint(self):
+        return self.waypoints[self.cur_waypoint]
+    def set_next_waypoint(self):
+        self.cur_waypoint = (self.cur_waypoint+1)%len(self.waypoints) if self.looped else self.cur_waypoint+1
+    def finished(self):
+        return self.cur_waypoint == len(self.waypoints) and not self.looped
+    def setPathWithList(self, new_path):
+        self.waypoints = list(new_path)
+    def setPathWithPath(self, path):
+        self.waypoints = list(path.waypoints)
+    def clear(self):
+        self.waypoints = []
+    def createRandomPath(self, NumWaypoints, MinX, MinY, MaxX, MaxY):
+        self.waypoints = []
+        midX = (MaxX+MinX)/2.0
+        midY = (MaxY+MinY)/2.0
+        smaller = min(midX, midY)
+        spacing = 2*math.pi/float(NumWaypoints)
+        for i in range(NumWaypoints):
+            radial_dist = random.randrange(smaller*0.2, smaller)
+            temp = Vec2D(radial_dist, 0.0)
+            Vec2DRotateAroundOrigin(temp, i*spacing);
+            temp.x += midX
+            temp.y += midY
+            self.addWayPoint(temp)  
+        return self.waypoints
+    def draw(self, canvas):
+        wp = [pt.value() for pt in self.waypoints]
+        if self.looped: 
+            if isEdit:	# global
+                canvas.draw_polyline(wp+[wp[0]], 1, "Orange")
+            else:
+                canvas.draw_polyline(wp+[wp[0]], 1, "DarkBlue")
+        else:
+            canvas.draw_polyline(wp, 1, "Orange")
+            
+        canvas.draw_circle(self.get_cur_waypoint().value(), 4, 1, "Orange", "Orange")
+class Wall2D:
+    def __init__(self, mva=None, mvb=None, mvn=None):
+        self.m_vA = Vec2D() if not mva else mva
+        self.m_vB = Vec2D() if not mvb else mvb
+        if mvn:
+            self.m_vN = mvn
+        else:
+            self.m_vN = Vec2D()
+            self.calculate_normal()
+    def From(self):
+        return self.m_vA
+    def To(self):
+        return self.m_vB            
+    def calculate_normal(self):
+        temp = normalize_Vec2D(self.m_vB - self.m_vA)
+        self.m_vN.x = -temp.y
+        self.m_vN.y = temp.x
+    def draw(self, canvas):
+        canvas.draw_line(self.m_vA.value(), self.m_vB.value(), 3, "Blue")
+    def normal(self):
+        return self.m_vN
+    def set_normal(self, n):
+        self.m_vN = n
+    def center(self):
+        return (self.m_vA+self.m_vB)/2.0
+WANDER_RAD = 4.2#1.2			#the radius of the constraining circle for the wander behavior
+WANDER_DIST = 5.0			#distance the wander circle is projected in front of the agent
+WANDER_JITTER_PER_SEC = 80.0	#the maximum amount of displacement along the circle each frame
+WAYPOINT_SEEK_DIST = 20		#used in path following
+WEIGHTED_AVERAGE, PRIORITIZED, DITHERED = [0,1,2]
+SLOW, NORMAL, FAST = [3,2,1]
+_NONE               = 0x00000
+_SEEK               = 0x00002
+_FLEE               = 0x00004
+_ARRIVE             = 0x00008
+_WANDER             = 0x00010
+_COHESION           = 0x00020
+_SEPARATION         = 0x00040
+_ALIGNMENT          = 0x00080
+_OBSTACLE_AVOIDANCE = 0x00100
+_WALL_AVOIDANCE     = 0x00200
+_FOLLOW_PATH        = 0x00400
+_PURSUIT            = 0x00800
+_EVADE              = 0x01000
+_INTERPOSE          = 0x02000
+_HIDE               = 0x04000
+_FLOCK              = 0x08000
+_OFFSET_PURSUIT     = 0x10000
+class SteeringBehavior:
+    def __init__(self, agent):
+        self.vehicle = agent
+        self.steering_force = Vec2D()
+        self.flags = 0
+        self.box_length = Prm.min_detection_box_length
+        self.weight_cohesion = Prm.cohesion_weight
+        self.weight_alignment = Prm.alignment_weight
+        self.weight_separation = Prm.separation_weight
+        self.weight_obstacle_avoidance = Prm.obstacle_avoidance_weight
+        self.weight_wander = Prm.wander_weight
+        self.weight_wall_avoidance = Prm.wall_avoidance_weight
+        self.view_distance = Prm.view_distance
+        self.wall_detection_feeler_length = Prm.wall_detection_feeler_length
+        self.feelers = []
+        self.deceleration = NORMAL
+        self.target_agent1 = None
+        self.target_agent2 = None
+        self.target = None
+        self.wander_distance = WANDER_DIST
+        self.wander_jitter = WANDER_JITTER_PER_SEC
+        self.wander_radius = WANDER_RAD
+        self.waypoint_seek_dist_sq = WAYPOINT_SEEK_DIST * WAYPOINT_SEEK_DIST
+        self.weight_seek = Prm.seek_weight
+        self.weight_flee = Prm.flee_weight
+        self.weight_arrive = Prm.arrive_weight
+        self.weight_pursuit = Prm.pursuit_weight
+        self.weight_offset_pursuit = Prm.offset_pursuit_weight
+        self.weight_interpose = Prm.interpose_weight
+        self.weight_hide = Prm.hide_weight
+        self.weight_evade = Prm.evade_weight
+        self.weight_follow_path = Prm.follow_path_weight
+        self.cell_space_on = True#False
+        self.summing_method = PRIORITIZED#DITHERED
+        self.offset = None
+        self.path = self.vehicle.world.path
+        self.theta = random.random() * 2*math.pi
+        self.wander_target = Vec2D(self.wander_radius * math.cos(self.theta),
+                              self.wander_radius * math.sin(self.theta))
+    def set_target(self, t):
+        self.target = t
+    def set_target_agent1(self, agent):
+        self.target_agent1 = agent
+    def set_target_agent2(self, agent):
+        self.target_agent2 = Agent
+    def set_offset(self, offset):
+        self.offset = offset
+    def get_offset(self):
+        return self.offset
+    def force(self):
+        return self.steering_force
+    def toggle_space_partitioning_OnOff(self):
+        self.cell_space_on = not self.cell_space_on
+    def isSpacePartitioningOn(self):
+        return self.cell_space_on
+    def set_summing_method(self, sm):
+        self.summing_method = sm
+    def flee_on(self): self.flags |= _FLEE     
+    def seek_on(self): self.flags |= _SEEK  
+    def arrive_on(self): self.flags |= _ARRIVE
+    def wander_on(self): self.flags |= _WANDER    
+    def pursuit_on(self, v):
+        self.flags |= _PURSUIT
+        self.target_agent1 = v
+    def evade_on(self, v):
+        self.flags |= _EVADE
+        self.target_agent1 = v
+    def cohesion_on(self): self.flags |= _COHESION
+    def separation_on(self): self.flags |= _SEPARATION
+    def alignment_on(self): self.flags |= _ALIGNMENT
+    def obstacle_avoidance_on(self): self.flags |= _OBSTACLE_AVOIDANCE
+    def wall_avoidance_on(self): self.flags |= _WALL_AVOIDANCE
+    def follow_path_on(self): self.flags |= _FOLLOW_PATH
+    def interpose_on(self, v1, v2):
+        self.flags |= _INTERPOSE
+        self.target_agent1 = v1 
+        self.target_agent2 = v2
+    def hide_on(self, v):
+        self.flags |= _HIDE
+        self.target_agent1 = v
+    def offset_pursuit_on(self, v1, offset):
+        self.flags |= _OFFSET_PURSUIT
+        self.offset = offset
+        self.target_agent1 = v1
+    def flocking_on(self):
+        self.cohesion_on()
+        self.alignment_on()
+        self.separation_on()
+        self.wander_on()
+    def flee_off(self): 
+        if self.isOn(_FLEE): self.flags ^=_FLEE
+    def seek_off(self):
+        if self.isOn(_SEEK): self.flags ^=_SEEK
+    def arrive_off(self):
+        if self.isOn(_ARRIVE): self.flags ^=_ARRIVE  
+    def wander_off(self):
+        if self.isOn(_WANDER): self.flags ^=_WANDER
+    def pursuit_off(self):
+        if self.isOn(_PURSUIT): self.flags ^=_PURSUIT
+    def evade_off(self):
+        if self.isOn(_EVADE): self.flags ^=_EVADE
+    def cohesion_off(self):
+        if self.isOn(_COHESION): self.flags ^=_COHESION
+    def separation_off(self):
+        if self.isOn(_SEPARATION): self.flags ^=_SEPARATION
+    def alignment_off(self):
+        if self.isOn(_ALIGNMENT): self.flags ^=_ALIGNMENT
+    def obstacle_avoidance_off(self):
+        if self.isOn(_OBSTACLE_AVOIDANCE): self.flags ^=_OBSTACLE_AVOIDANCE
+    def wall_avoidance_off(self):
+        if self.isOn(_WALL_AVOIDANCE): self.flags ^=_WALL_AVOIDANCE
+    def follow_path_off(self):
+        if self.isOn(_FOLLOW_PATH): self.flags ^=_FOLLOW_PATH
+    def interpose_off(self):
+        if self.isOn(_INTERPOSE): self.flags ^=_INTERPOSE
+    def hide_off(self):
+        if self.isOn(_HIDE): self.flags ^=_HIDE
+    def offset_pursuit_off(self):
+        if self.isOn(_OFFSET_PURSUIT): self.flags ^=_OFFSET_PURSUIT
+    def flocking_off(self):
+        self.cohesion_off()
+        self.alignment_off()
+        self.separation_off()
+        self.wander_off()
+    def isFleeOn(self): return self.isOn(_FLEE)
+    def isSeekOn(self): return self.isOn(_SEEK)
+    def isArriveOn(self): return self.isOn(_ARRIVE)
+    def isWanderOn(self): return self.isOn(_WANDER)
+    def isPursuitOn(self): return self.isOn(_PURSUIT)
+    def isEvadeOn(self): return self.isOn(_EVADE)
+    def isCohesionOn(self): return self.isOn(_COHESION)
+    def isSeparationOn(self): return self.isOn(_SEPARATION)
+    def isAlignmentOn(self): return self.isOn(_ALIGNMENT)
+    def isObstacleAvoidanceOn(self): return self.isOn(_OBSTACLE_AVOIDANCE)
+    def isWallAvoidanceOn(self): return self.isOn(_WALL_AVOIDANCE)
+    def isFollowPathOn(self): return self.isOn(_FOLLOW_PATH)
+    def isInterposeOn(self): return self.isOn(_INTERPOSE)
+    def isHideOn(self): return self.isOn(_HIDE)
+    def isOffsetPursuitOn(self): return self.isOn(_OFFSET_PURSUIT)
+    def dbox_length(self):
+        return self.dbox_length    
+    def get_feelers(self):
+        return self.feelers
+    def separation_weight(self):
+        return self.weight_separation
+    def alignment_weight(self):
+        return self.weight_alignment       
+    def cohesion_weight(self):
+        return self.weight_cohesion
+    def isOn(self, bt):
+        return (self.flags & bt) == bt
+    def calculate(self):
+        self.steering_force.zero()
+        if not self.isSpacePartitioningOn():
+            if self.isOn(_SEPARATION) or self.isOn(_ALIGNMENT) or self.isOn(_COHESION):
+                self.vehicle.world.tag_vehicles_within_view_range(self.vehicle, self.view_distance)
+        else:
+            if self.isOn(_SEPARATION) or self.isOn(_ALIGNMENT) or self.isOn(_COHESION):
+                self.vehicle.world.cell_space.calculate_neighbors(self.vehicle.position, self.view_distance)
+        if self.summing_method == PRIORITIZED:
+            self.steering_force = self.calculate_prioritized()
+        else:
+            self.steering_force = Vec2D()
+        return self.steering_force
+    def forward_component(self):
+        return self.vehicle.heading.dot(self.steering_force)
+    def side_component(self):
+        return self.vehicle.v_side.dot(self.steering_force)
+    def accumulate_force(self, running_tot, force_to_add):
+        magnitude_so_far = running_tot.length()
+        magnitude_remaining = self.vehicle.max_force - magnitude_so_far
+        if magnitude_remaining <= 0.0: return False
+        magnitude_to_add = force_to_add.length()
+        if magnitude_to_add < magnitude_remaining:
+            running_tot += force_to_add
+        else:
+            running_tot += force_to_add.get_normal() * magnitude_remaining
+        return True
+    def calculate_prioritized(self):
+        if self.isOn(_WALL_AVOIDANCE):
+            force = self.wall_avoidance(self.vehicle.world.walls) * self.weight_wall_avoidance
+            if not self.accumulate_force(self.steering_force, force): return self.steering_force
+        if self.isOn(_OBSTACLE_AVOIDANCE):
+            force = self.obstacle_avoidance(self.vehicle.world.obstacles) * self.weight_obstacle_avoidance
+            if not self.accumulate_force(self.steering_force, force): return self.steering_force
+        if self.isOn(_EVADE):
+            assert self.target_agent1, "Evade target not assigned"
+            force = self.evade(self.target_agent1) * self.weight_evade
+            if not self.accumulate_force(self.steering_force, force): return self.steering_force
+        if self.isOn(_FLEE):
+            force = self.flee(self.vehicle.world.crosshair) * self.weight_flee
+            if not self.accumulate_force(self.steering_force, force): return self.steering_force
+        if self.isOn(_FOLLOW_PATH):
+            force = self.follow_path() * self.weight_follow_path
+            if not self.accumulate_force(self.steering_force, force): return self.steering_force
+        if not self.isSpacePartitioningOn():
+            if self.isOn(_SEPARATION):
+                force = self.separation(self.vehicle.world.vehicles) * self.weight_separation
+                if not self.accumulate_force(self.steering_force, force): return self.steering_force
+            if self.isOn(_ALIGNMENT):
+                force = self.alignment(self.vehicle.world.vehicles) * self.weight_alignment
+                if not self.accumulate_force(self.steering_force, force): return self.steering_force
+            if self.isOn(_COHESION):
+                force = self.cohesion(self.vehicle.world.vehicles) * self.weight_cohesion
+                if not self.accumulate_force(self.steering_force, force): return self.steering_force
+        else:
+            if self.isOn(_SEPARATION):
+                force = self.separation_plus(self.vehicle.world.vehicles) * self.weight_separation
+                if not self.accumulate_force(self.steering_force, force): return self.steering_force
+            if self.isOn(_ALIGNMENT):
+                force = self.alignment_plus(self.vehicle.world.vehicles) * self.weight_alignment
+                if not self.accumulate_force(self.steering_force, force): return self.steering_force
+            if self.isOn(_COHESION):
+                force = self.cohesion_plus(self.vehicle.world.vehicles) * self.weight_cohesion
+                if not self.accumulate_force(self.steering_force, force): return self.steering_force
+        if self.isOn(_SEEK):
+            force = self.seek(self.vehicle.world.crosshair) * self.weight_seek
+            if not self.accumulate_force(self.steering_force, force): return self.steering_force
+        if self.isOn(_ARRIVE):
+            force = self.arrive(self.vehicle.world.crosshair, self.deceleration) * self.weight_arrive
+            if not self.accumulate_force(self.steering_force, force): return self.steering_force
+        if self.isOn(_WANDER):
+            force = self.wander() * self.weight_wander
+            if not self.accumulate_force(self.steering_force, force): return self.steering_force
+        if self.isOn(_PURSUIT):
+            assert self.target_agent1, "pursuit target not assigned"
+            force = self.pursuit(self.target_agent1) * self.weight_pursuit
+            if not self.accumulate_force(self.steering_force, force): return self.steering_force
+        if self.isOn(_OFFSET_PURSUIT):
+            assert self.target_agent1, "pursuit target not assigned"
+            assert not self.offset.isZero(), "No offset assigned"
+            force = self.offset_pursuit(self.target_agent1, self.offset)
+            if not self.accumulate_force(self.steering_force, force): return self.steering_force
+        if self.isOn(_INTERPOSE):
+            assert self.target_agent1 and self.target_agent2, "Interpose agents not assigned"
+            force = self.interpose(self.target_agent1, self.target_agent2) * self.weight_interpose
+            if not self.accumulate_force(self.steering_force, force): return self.steering_force
+        if self.isOn(_HIDE):
+            assert self.target_agent1, "Hide target not assigned"
+            force = self.hide(self.target_agent1, self.vehicle.world.obstacles) * self.weight_hide
+            if not self.accumulate_force(self.steering_force, force): return self.steering_force
+        return self.steering_force
+    def seek(self, target_pos):
+        desired_velocity = (target_pos - self.vehicle.position) * self.vehicle.max_speed
+        return desired_velocity - self.vehicle.velocity
+    def flee(self, target_pos):
+        desired_velocity = (self.vehicle.position - target_pos) * self.vehicle.max_speed
+        return desired_velocity - self.vehicle.velocity
+    def arrive(self, target_pos, deceleration):
+        to_target = target_pos - self.vehicle.position
+        dist = to_target.length()
+        if (dist > 0):
+            deceleration_tweaker = 0.3
+            speed =  dist / (float(deceleration) * deceleration_tweaker)    
+            speed = min(speed, self.vehicle.max_speed)
+            desired_velocity = to_target * speed / dist
+            return desired_velocity - self.vehicle.velocity
+        return Vec2D()
+    def pursuit(self, evader):
+        to_evader = evader.position - self.vehicle.position
+        relative_heading = self.vehicle.heading.dot(evader.heading)
+        if to_evader.dot(self.vehicle.heading) > 0 and relative_heading < -0.95:    
+            return self.seek(evader.position)
+        look_ahead_time = to_evader.length() / (self.vehicle.max_speed + evader.speed())
+        return self.seek(evader.position + evader.velocity * look_ahead_time)
+    def evade(self, pursuer):
+        to_pursuer = pursuer.position - self.vehicle.position
+        threat_range = 100.0
+        if to_pursuer.length_sq() > threat_range * threat_range: return Vec2D()
+        look_ahead_time = to_pursuer.length() / (self.vehicle.max_speed + pursuer.speed())
+        return self.flee(pursuer.position + pursuer.velocity * look_ahead_time)
+    def wander(self):
+        jitter_this_time_slice = self.wander_jitter * self.vehicle.time_elapsed
+        self.wander_target += Vec2D(random_clamped() * jitter_this_time_slice,
+                                  random_clamped() * jitter_this_time_slice)
+        self.wander_target.normalize()
+        self.wander_target *= self.wander_radius
+        wd = Vec2D(self.wander_distance, 0)
+        target = self.wander_target + wd #Vec2D(self.wander_distance, 0)
+        target = PointToWorldSpace(target,
+                                   self.vehicle.heading,
+                                   self.vehicle.v_side, 
+                                   self.vehicle.position)
+        return target - self.vehicle.position
+    def obstacle_avoidance(self, obstacles):
+        self.dbox_length = Prm.min_detection_box_length + (self.vehicle.speed()/self.vehicle.max_speed) * Prm.min_detection_box_length
+        self.vehicle.world.tag_obstacles_within_view_range(self.vehicle, self.dbox_length)
+        dist_to_closest_IP = float('inf')
+        steering_force = Vec2D()
+        closest_intersecting_obstacle = None
+        for cur in obstacles:
+            if cur.isTagged():
+                local_pos = PointToLocalSpace(cur.position,
+                                             self.vehicle.heading,
+                                             self.vehicle.v_side,
+                                             self.vehicle.position)
+                if local_pos.x >= 0:
+                    expanded_radius = cur.bound_radius + self.vehicle.bound_radius
+                    if math.fabs(local_pos.y) < expanded_radius:
+                        cX = local_pos.x
+                        cY = local_pos.y
+                        sqrt_part = math.sqrt(expanded_radius*expanded_radius - cY*cY)
+                        ip = cX - sqrt_part
+                        if (ip <= 0.0):
+                            ip = cX + sqrt_part
+                        if (ip < dist_to_closest_IP):
+                            dist_to_closest_IP = ip;
+                            closest_intersecting_obstacle = cur
+                            local_pos_of_closest_obstacle = local_pos
+        if closest_intersecting_obstacle:
+            multiplier = 1.0 + (self.dbox_length - local_pos_of_closest_obstacle.x) / self.dbox_length
+            steering_force = Vec2D()
+            steering_force.y = (closest_intersecting_obstacle.bound_radius -
+                               local_pos_of_closest_obstacle.y)  * multiplier   
+            braking_weight = 0.2
+            steering_force.x = (closest_intersecting_obstacle.bound_radius - local_pos_of_closest_obstacle.x) * braking_weight
+        return VectorToWorldSpace(steering_force,
+                                  self.vehicle.heading,
+                                  self.vehicle.v_side)
+    def wall_avoidance(self, walls):
+        steering_force = Vec2D()
+        self.feelers=[]
+        self.create_feelers()
+        dist_to_this_IP = 0.0
+        dist_to_closest_IP = float('inf')
+        point = Vec2D()
+        closest_point = Vec2D()
+        closest_wall = -1
+        for flr in range(len(self.feelers)):
+            for w in range(len(walls)):
+                if (LineIntersection2D(self.vehicle.position,
+                                     self.feelers[flr],
+                                     walls[w].From(),
+                                     walls[w].To(),
+                                     dist_to_this_IP,
+                                     point)):
+                    if dist_to_this_IP < dist_to_closest_IP:
+                        dist_to_closest_IP = dist_to_this_IP
+                        closest_wall = w
+                        closest_point = point
+            if closest_wall >= 0:
+                over_shoot = self.feelers[flr] - closest_point
+                steering_force = Vec2D( walls[closest_wall].normal() ) * over_shoot.length()
+        return steering_force
+    def create_feelers(self):
+        self.feelers.append(self.vehicle.position + (self.vehicle.heading * self.wall_detection_feeler_length))
+        temp = Vec2D(self.vehicle.heading)
+        Vec2DRotateAroundOrigin(temp, math.pi/2 * 3.5)
+        self.feelers.append(self.vehicle.position + self.wall_detection_feeler_length/2.0 * temp)
+        temp = Vec2D(self.vehicle.heading)
+        Vec2DRotateAroundOrigin(temp, math.pi/2 * 0.5)
+        self.feelers.append(self.vehicle.position + self.wall_detection_feeler_length/2.0 * temp)
+    def separation(self, neighbors):
+        steering_force = Vec2D()
+        for a in range(len(neighbors)):
+            if (neighbors[a] != self.vehicle) and neighbors[a].isTagged() and (neighbors[a] != self.target_agent1):
+                to_agent = self.vehicle.position - neighbors[a].position
+                steering_force += to_agent.get_normal()/to_agent.length()
+        return steering_force
+    def alignment(self, neighbors):
+        neighbor_count = 0
+        average_heading = Vec2D() 
+        for a in range(len(neighbors)):
+            if (neighbors[a] != self.vehicle) and neighbors[a].isTagged() and (neighbors[a] != self.target_agent1):
+                average_heading += neighbors[a].heading
+                neighbor_count+=1
+        if neighbor_count > 0:
+            average_heading /= float(neighbor_count)
+            average_heading -= self.vehicle.heading
+        return average_heading
+    def cohesion(self, neighbors):
+        neighbor_count = 0
+        center_of_mass = Vec2D()
+        steering_force = Vec2D()
+        for a in range(len(neighbors)):
+            if (neighbors[a] != self.vehicle) and neighbors[a].isTagged() and (neighbors[a] != self.target_agent1):
+                center_of_mass += neighbors[a].position
+                neighbor_count+=1
+        if neighbor_count > 0:
+            center_of_mass /= float(neighbor_count)
+            steering_force = self.seek(center_of_mass)
+        return steering_force.normalize()
+    def separation_plus(self, neighbors):
+        steering_force = Vec2D()
+        for pv in neighbors:
+            if(pv != self.vehicle):
+                to_agent = self.vehicle.position - pv.position
+                steering_force += to_agent.get_normal()/to_agent.length()
+        return steering_force
+    def alignment_plus(self, neighbors):
+        neighbor_count = 0.0
+        average_heading = Vec2D()
+        for pv in neighbors: #self.vehicle.world.cell_space:
+            if(pv != self.vehicle):
+                average_heading += self.vehicle.heading
+                neighbor_count+=1
+        if neighbor_count > 0.0:
+            average_heading /= neighbor_count
+            average_heading -= self.vehicle.heading
+        return average_heading
+    def cohesion_plus(self, neighbors):
+        neighbor_count = 0
+        center_of_mass = Vec2D()
+        steering_force = Vec2D()
+        for pv in neighbors: #self.vehicle.world.cell_space:
+            if(pv != self.vehicle):
+                center_of_mass += pv.position
+                neighbor_count+=1
+        if neighbor_count > 0:
+            center_of_mass /= float(neighbor_count)
+            steering_force = self.seek(center_of_mass)
+        return steering_force.normalize()
+    def interpose(self, agentA, agentB):
+        mid_point = (agentA.position + agentB.position) / 2.0
+        time_to_reach_mid_point = distance_Vec2D(self.vehicle.position, mid_point) / self.vehicle.max_speed
+        apos = agentA.position + agentA.velocity * time_to_reach_mid_point
+        bpos = agentB.position + agentB.velocity * time_to_reach_mid_point
+        mid_point = (apos + bpos) / 2.0
+        return self.arrive(mid_point, FAST)
+    def hide(self, hunter, obstacles):
+        dist_to_closest = float('inf')
+        to_pursuer = hunter.position - self.vehicle.position
+        threat_range = 200.0
+        if to_pursuer.length_sq() > threat_range * threat_range: return Vec2D()
+        for cur in obstacles:
+            hiding_spot = self.get_hiding_position(cur.position,
+                                                   cur.bound_radius,
+                                                   hunter.position)
+            dist = distance_sq_Vec2D(hiding_spot, self.vehicle.position)
+            if (dist < dist_to_closest):
+                dist_to_closest = dist
+                best_hiding_spot = hiding_spot
+                closest = cur
+        if dist_to_closest == float('inf'):
+            return self.evade(hunter)
+        return self.arrive(best_hiding_spot, FAST)
+    def get_hiding_position(self, pos_ob, radius_ob, pos_hunter):
+        distance_from_boundary = 30.0
+        dist_away = radius_ob + distance_from_boundary
+        to_ob = (pos_ob - pos_hunter).normalize()
+        return to_ob * dist_away + pos_ob
+    def follow_path(self):
+        if(distance_sq_Vec2D(self.path.get_cur_waypoint(), self.vehicle.position) < self.waypoint_seek_dist_sq):
+            self.path.set_next_waypoint()
+        if not self.path.finished():
+            return self.seek(self.path.get_cur_waypoint()).normalize()
+        else:
+            return self.arrive(self.path.get_cur_waypoint(), NORMAL)
+    def offsetPursuit(self, leader, offset):
+        world_offset_pos = PointToWorldSpace(offset,
+                                           leader.heading,
+                                           leader.v_side,
+                                           leader.position)
+        to_offset = world_offset_pos - self.vehicle.position
+        look_ahead_time = to_offset.length() / (self.vehicle.max_speed + leader.speed())
+        return self.arrive(world_offset_pos + leader.velocity * look_ahead_time, FAST)
+    def renderAids(self, canvas):
+        NextSlot = 0
+        SlotSize = 20
+        if (self.vehicle.max_force < 0): self.vehicle.setMaxForce(0.0)
+        if (self.vehicle.max_speed < 0): self.vehicle.setMaxSpeed(0.0)
+        if (self.vehicle.ID == 0):
+            pass 
+        if self.vehicle.ID == 0:
+            pass
+        if self.vehicle.world.show_steering_force: 
+            F = (self.steering_force / Prm.steering_force_tweaker) * Prm.vehicle_scale
+            canvas.draw_line(self.vehicle.position.value(), (self.vehicle.position + F).value(), 1, "Red")
+        if self.isOn(_WANDER) and self.vehicle.world.show_wander_circle: 
+            if (self.vehicle.ID == 0):
+                pass
+            if (self.vehicle.ID == 0):
+                pass
+            if (self.vehicle.ID == 0):
+                pass
+            TCC = PointToWorldSpace(Vec2D(self.wander_distance*self.vehicle.bound_radius, 0),
+                                                 self.vehicle.heading,
+                                                 self.vehicle.v_side,
+                                                 self.vehicle.position)
+            canvas.draw_circle(TCC.value(), self.wander_radius*self.vehicle.bound_radius, 1, "Green")
+            canvas.draw_circle(PointToWorldSpace((self.wander_target + Vec2D(self.wander_distance,0))*self.vehicle.bound_radius,
+                                          self.vehicle.heading,
+                                          self.vehicle.v_side,
+                                          self.vehicle.position).value(), 3, 1, "Red")                     
+        if self.vehicle.world.show_detection_box:
+            box = []
+            length = Prm.min_detection_box_length + (self.vehicle.speed()/self.vehicle.max_speed) * Prm.min_detection_box_length
+            box.append(Vec2D([0,self.vehicle.bound_radius]))
+            box.append(Vec2D([length, self.vehicle.bound_radius]))
+            box.append(Vec2D([length, -self.vehicle.bound_radius]))
+            box.append(Vec2D([0, -self.vehicle.bound_radius]))        
+            if not self.vehicle.isSmoothingOn():
+                box = WorldTransform(box,self.vehicle.position, self.vehicle.heading, self.vehicle.v_side, Vec2D(1,1))
+            else:
+                box = WorldTransform(box,self.vehicle.position, self.vehicle.smoothed_heading, 
+                                     self.vehicle.smoothed_heading.perp(), Vec2D(1,1))
+            b = [i.value() for i in box]
+            canvas.draw_polygon(b, 1, "Grey")	#DEBUG
+            BoxLength = Prm.min_detection_box_length + (self.vehicle.speed()/self.vehicle.max_speed) * Prm.min_detection_box_length
+            self.vehicle.world.tag_obstacles_within_view_range(self.vehicle, BoxLength)
+            ClosestIntersectingObstacle = None
+            DistToClosestIP = float('inf')
+            for curOb in self.vehicle.world.obstacles:
+                if (curOb.isTagged()):
+                    LocalPos = PointToLocalSpace(curOb.position,
+                                                 self.vehicle.heading,
+                                                 self.vehicle.v_side,
+                                                 self.vehicle.position)
+                    if (LocalPos.x >= 0):
+                        if math.fabs(LocalPos.y) < (curOb.bound_radius + self.vehicle.bound_radius):
+                            pass
+        if self.isOn(_WALL_AVOIDANCE) and self.vehicle.world.show_feelers:
+            for flr in self.feelers:
+                canvas.draw_line(self.vehicle.position.value(), Vec2D(flr).value(), 1, "Orange")
+        if self.isOn(_FOLLOW_PATH) and self.vehicle.world.show_path:
+            self.path.draw(canvas)    
+        if self.isOn(_SEPARATION):
+            if self.vehicle.ID == 0:
+                pass
+        if self.isOn(_ALIGNMENT):
+            pass
+        if self.isOn(_COHESION):
+            pass
+        if self.isOn(_FOLLOW_PATH):
+            pass
+class GameWorld:
+    def __init__(self, cx, cy):
+        self.cx_client = cx
+        self.cy_client = cy
+        self.paused = False
+        self.crosshair = Vec2D(self.cx_client/2.0, self.cy_client/2.0)
+        self.show_walls = True
+        self.show_obstacles = True
+        self.show_path = True
+        self.show_wander_circle = False
+        self.show_steering_force = False
+        self.show_feelers = False
+        self.show_detection_box = False
+#        self.show_FPS = False
+        self.av_frame_time = 0
+        self.render_neighbors = True
+        self.view_keys = True
+        self.show_cell_space_info = False
+        self.vehicles = []
+        self.obstacles = []
+        self.walls = []
+        self.cell_space = CellSpacePartition(cx, cy, Prm.num_cells_x, Prm.num_cells_y, Prm.num_agents)
+        border = 30
+        self.path = Path(9, border, border, cx-border, cy-border, True) 
+        self.createWalls()
+        self.createObstacles()
+        for a in range(Prm.num_agents):
+            spawn_pos = Vec2D(cx/2.0+random_clamped()*cx/2.0,
+                              cy/2.0+random_clamped()*cy/2.0)
+            pVehicle = Vehicle(self,
+                               spawn_pos,                       #initial position
+                               random_clamped()*math.pi*2,      #start rotation
+                               Vec2D(),            				#velocity
+                               Prm.vehicle_mass,                #mass
+                               Prm.max_steering_force,          #max force
+                               Prm.max_speed,                   #max velocity
+                               Prm.max_turn_rate_per_second,    #max turn rate
+                               Prm.vehicle_scale)               #scale
+            pVehicle.steering.flocking_on()
+            pVehicle.steering.obstacle_avoidance_on()
+            pVehicle.steering.wall_avoidance_on()
+            pVehicle.set_max_speed(10)
+            self.vehicles.append(pVehicle)
+            self.cell_space.add_entity(pVehicle)
+        self.vehicles[0].set_tag()
+        self.vehicles[-1].set_tag()
+        self.vehicles[0].max_speed *= .70
+        self.vehicles[0].max_turn_rate *= 1.5
+        self.vehicles[0].steering.flocking_off()
+        self.vehicles[0].steering.wander_on()
+        self.vehicles[0].steering.follow_path_on()
+        for i in range(1, Prm.num_agents):
+            self.vehicles[i].max_speed = int(self.vehicles[i].max_speed * random.randrange(80, 95)*.01)     
+    def nonPenetrationContraint(self, veh):
+        enforce_non_penetration_constraint(veh, self.vehicles + self.obstacles)
+    def tag_vehicles_within_view_range(self, pVehicle, in_range):
+        tag_neighbors(pVehicle, self.vehicles, in_range)
+    def tag_obstacles_within_view_range(self, pVehicle, in_range):
+        tag_neighbors(pVehicle, self.obstacles, in_range)
+    def togglePause(self):
+        self.paused = not self.paused
+    def setCrosshair(self, v):
+        m_vCrosshair = v
+    def toggleRenderNeighbors(self):
+        self.render_neighbors = not self.render_neighbors
+    def toggleViewKeys(self):
+        self.view_keys = not self.view_keys
+    def update(self, time_elapsed):
+        if self.paused: return
+        sample_rate = 10
+        frame_rate_smoother = Smoother(sample_rate, 0.0) 
+        self.av_frame_time = frame_rate_smoother.update(time_elapsed)
+        for v in self.vehicles: 
+            v.update(time_elapsed)
+            self.nonPenetrationContraint(v)
+    def createWalls(self): 
+        border_size = 20.0
+        corner_size = 0.2
+        v_dist = self.cx_client-2*border_size
+        h_dist = self.cy_client-2*border_size
+        walls = []
+        num_wall_verts = 10	
+        walls.extend([Vec2D(h_dist*corner_size+border_size, border_size),
+                           Vec2D((SCW*0.5), SCH*0.1),#
+                           Vec2D(self.cx_client-border_size-h_dist*corner_size, border_size),
+                           Vec2D(self.cx_client-border_size, border_size+v_dist*corner_size),
+                           Vec2D(self.cx_client-border_size, self.cy_client-border_size-v_dist*corner_size),    
+                           Vec2D(self.cx_client-border_size-h_dist*corner_size, self.cy_client-border_size),
+                           Vec2D((SCW*0.5), SCH*0.9),#
+                           Vec2D(h_dist*corner_size+border_size, self.cy_client-border_size),
+                           Vec2D(border_size, self.cy_client-border_size-v_dist*corner_size),
+                           Vec2D(border_size, border_size+v_dist*corner_size)])
+        for w in range(num_wall_verts-1):
+            self.walls.append(Wall2D(walls[w], walls[w+1]))
+        self.walls.append(Wall2D(walls[num_wall_verts-1], walls[0]))
+    def createObstacles(self):
+        for o in range(Prm.num_obstacles):	
+            over_lapped = True
+            num_trys = 0 
+            num_allowable_trys = 2000
+            while over_lapped:
+                num_trys+=1
+                if num_trys > num_allowable_trys: return
+                radius = random.randint(Prm.min_obstacle_radius, Prm.max_obstacle_radius)
+                border = 80#10
+                min_gap_between_obstacles = 30
+                rnd1 = random.randint(radius+border, self.cx_client-radius-border)
+                rnd2 = random.randint(radius+border, self.cy_client-radius-30-border)
+                ob = Obstacle( Vec2D(rnd1,rnd2),radius)
+                if not overlapped(ob, self.obstacles, min_gap_between_obstacles):
+                    self.obstacles.append(ob)
+                    over_lapped = False        
+        else:
+            del(ob)
+    def setCrosshair(p):
+        proposedPosition(p.x, p.y)
+        for curOb in self.obstacles:
+            if pointInCircle(curOb.pos(), curOb.BRadius(), proposedPosition):
+                return
+        self.crosshair.x = float(p.x)
+        self.crosshair.y = float(p.y)
+    def draw(self, canvas):
+        for o in self.obstacles: o.draw(canvas)
+        for w in self.walls: w.draw(canvas) 
+        for v in self.vehicles: v.draw(canvas)
+DEFAULT_ENTITY_TYPE = -1
+class BaseEntity:
+    next_ID = 0
+    def __init__(self, entity_type=DEFAULT_ENTITY_TYPE, pos=[1,1], radius=0.0):
+        self.entity_type = entity_type
+        self.position = Vec2D(pos)
+        self.bound_radius = radius
+        self.ID = self.next_valid_ID()
+        self.scale = Vec2D(1,1)
+        self.tag = False
+    def next_valid_ID(cls):
+        my_id = BaseEntity.next_ID
+        BaseEntity.next_ID += 1
+        return my_id
+    def set_position(self, new_pos):
+        self.position = Vec2D(new_pos)
+    def set_bound_radius(self, r):
+        self.bound_radius = float(r)
+    def isTagged(self):
+        return self.tag
+    def set_tag(self, t=True):
+        self.tag = t
+    def set_scale(self, val):
+        if isinstance(val, type(Vec2D())):
+            self.bound_radius *= max(val.x, val.y)/max(self.scale.x, self.scale.y)
+            self.scale = val
+        else:
+            self.bound_radius *= (val/max(self.scale.x, self.scale.y))
+            self.scale = Vec2D(val, val) 
+    def set_entity_type(self, new_type):
+        self.entity_type = new_type
+    def update(self, time_elapsed):
+        pass
+    def draw(self, canvas):
+        pass
+class Obstacle(BaseEntity):
+    def __init__(self, pos, radius):
+        BaseEntity.__init__(self, 0, pos, radius)
+        self.line_width = 1
+    def update(self, time_elapsed):
+        pass
+    def draw(self, canvas):
+        canvas.draw_circle(self.position.value(), self.bound_radius, self.line_width, "Grey", "Grey")    
+class MovingEntity(BaseEntity):
+    def __init__(self,
+                 position, 
+                 radius, 
+                 vel, 
+                 max_speed, 
+                 heading, 
+                 mass, 
+                 scale, 
+                 turn_rate, 
+                 max_force):       
+        BaseEntity.__init__(self, 0, position, radius)
+        self.heading = Vec2D(heading)
+        self.velocity = Vec2D(vel)
+        self.mass = float(mass)
+        self.v_side = self.heading.perp()
+        self.max_speed = float(max_speed)
+        self.max_turn_rate = turn_rate
+        self.max_force = max_force
+        self.scale = Vec2D(scale)
+    def set_velocity(self, new_vel):
+        self.velocity = Vec2D(new_vel)
+    def set_max_speed(self, new_speed):
+        self.max_speed = float(new_speed)
+    def set_max_force(self, mf):
+        self.max_force = float(mf)
+    def max_turn_rate(self):
+        """Returns a Float"""
+        return self.max_turn_rate
+    def set_max_turn_rate(self, val):
+        """val is a Float"""
+        self.max_turn_rate = float(val)
+    def isSpeedMaxedOut(self):
+        return self.max_speed*self.max_speed >= self.velocity.length_sq()
+    def speed(self):
+        return self.velocity.length()
+    def speed_sq(self):
+        return self.velocity.length_sq()
+    def set_heading(self, new_heading):
+        new_heading = Vec2D(new_heading)	# make sure is a Vec2D
+        assert( (new_heading.length_sq() - 1.0) < 0.00001)
+        self.heading = new_heading
+        self.v_side = self.heading.perp()
+    def rotate_heading_to_face_position(self, target):  
+        target = Vec2D(target)
+        to_target = (target - self.position).normalize()
+        angle = math.acos(self.heading * to_target)
+        cw = 1 if (self.heading.x_prod(toTarget) >= 0) else -1
+        if angle < 0.0001: return True
+        if angle > self.max_turn_rate: angle = self.max_turn_rate  
+        x2 = self.heading.x*math.cos(angle)-self.heading.y*cw*math.sin(angle)
+        y2 = self.heading.x*cw*math.sin(angle)+self.heading.y*math.cos(angle)
+        self.set_heading([x2,y2])
+        self.velocity = self.velocity.length() * self.heading
+        return False
+class Vehicle(MovingEntity):
+    def __init__(self, the_world, pos, rot, vel, 
+                 mass, max_force, max_speed, 
+                 max_turn_rate, scale):
+        MovingEntity.__init__(self, 
+                              pos, 
+                              scale, 
+                              vel, 
+                              max_speed, 
+                              Vec2D(math.sin(rot), -math.cos(rot)), 
+                              mass,
+                              Vec2D(scale, scale),
+                              max_turn_rate,
+                              max_force)
+        self.world = the_world
+        self.smoothed_heading = Vec2D()
+        self.smoothing_on = True
+        self.time_elapsed = 0.0       
+        self.shape = [Vec2D(2,0), Vec2D(3, 0)]
+        self.steering = SteeringBehavior(self)    
+        self.heading_smoother = Smoother(Prm.num_samples_for_smoothing, Vec2D()) 
+    def __str__(self):
+        return "Vehicle:\n"
+    def isSmoothingOn(self):
+        return self.smoothing_on
+    def toggle_smoothing(self):
+        self.smoothing_on = not self.smoothing_on
+    def update(self, time_elapsed):
+        self.time_elapsed = time_elapsed
+        old_pos = self.position
+        steering_force = self.steering.calculate()
+        acceleration = steering_force / self.mass
+        self.velocity += acceleration.normalize() * self.max_turn_rate * time_elapsed
+        self.velocity.truncate(self.max_speed)
+        self.position += self.velocity * time_elapsed
+        if self.velocity.length_sq() > 0.00000001:
+            self.set_heading(Vec2D(self.velocity).normalize())
+        self.position.x %= self.world.cx_client
+        self.position.y %= self.world.cy_client
+        if self.steering.isSpacePartitioningOn():
+            self.world.cell_space.update_entity(self, old_pos)
+        if self.isSmoothingOn():
+            self.smoothed_heading = self.heading_smoother.update(self.heading)
+    def draw(self, canvas):
+        if self.world.render_neighbors:
+            if self.ID == 0: 
+                col = "Red"	
+            elif self.isTagged(): 
+                col="Green"	
+            else: 
+                col="Blue"		  
+        else:
+            col = "Blue"	
+        if self.isSmoothingOn():
+            shape_trans = WorldTransform(self.shape,
+                                            self.position,
+                                            self.smoothed_heading,
+                                            self.smoothed_heading.perp(),
+                                            self.scale)
+        else:
+            shape_trans = WorldTransform(self.shape,
+                                            self.position,
+                                            self.heading,
+                                            self.v_side,
+                                            self.scale) 
+        line_width = 20
+        st = [s.value() for s in shape_trans]
+        canvas.draw_polygon(st, line_width, col, col)
+        canvas.draw_circle(self.position.value(), 10, 2, col, col)
+        if self.world.view_keys:
+            self.steering.renderAids(canvas)
+Prm = ParamLoader()
+Game = GameWorld(SCW, SCH)            
+def reset():
+    global Prm, Game
+    a,b,c,d,e = (Game.show_path,
+                Game.show_wander_circle,
+                Game.show_steering_force,
+                Game.show_feelers,
+                Game.show_detection_box)
+    Prm = ParamLoader()
+    Game = GameWorld(SCW, SCH)
+    (Game.show_path,
+     Game.show_wander_circle,
+     Game.show_steering_force,
+     Game.show_feelers,
+     Game.show_detection_box) = a,b,c,d,e
+def pause_handler():
+    Game.togglePause()
+def tvk_handler():
+    Game.show_wander_circle = not Game.show_wander_circle
+    Game.show_steering_force = not Game.show_steering_force
+    Game.show_feelers = not Game.show_feelers
+    Game.show_detection_box = not Game.show_detection_box
+isEdit = False
+clicked = None
+def edit_handler():
+    global isEdit
+    isEdit = not isEdit        
+def mclick_handler(pos):
+    global clicked
+    clicked = None
+def mdrag_handler(pos):
+    global clicked
+    if not isEdit: return
+    if not clicked:
+        for wp in Game.path.waypoints:
+            if (Vec2D(pos) - wp).length_sq() < 10**2:
+                clicked = wp
+                break           
+    else:
+        clicked.set_value(pos[0], pos[1])
+def draw(canvas):
+    Game.update(1)
+    Game.draw(canvas)
+    if isEdit:
+        for pt in [vec.value() for vec in Game.path.waypoints]:
+            canvas.draw_circle(pt, 10, 1, "Yellow")
+codeskulptor.set_timeout(10)
+frame = simplegui.create_frame("Steering Behaviors", SCW, SCH, 100)
+frame.set_mouseclick_handler(mclick_handler)
+frame.set_mousedrag_handler(mdrag_handler)
+frame.add_button('Pause', pause_handler, 100)
+frame.add_button('Reset', reset, 100)
+frame.add_label('')
+frame.add_button('Toggle Feelers', tvk_handler, 100)
+frame.add_label('')
+frame.add_button('Tog Edit Path', edit_handler, 100)
+frame.set_canvas_background("Black")
+frame.set_draw_handler(draw)
+frame.start()
