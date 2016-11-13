@@ -1,0 +1,3208 @@
+# Can see this run online with Codeskulptor using this link
+#    http://www.codeskulptor.org/#save2_gRbEQJq0iE.py
+
+"""
+This program was a learning exercise for Python and Ai programming.
+It is a less-than-faithful port of Mat Buckland's Simple Soccer game
+from his book "Programming Game AI by Example". Most of the comments are his.
+
+A link to the original C++ source can be found here:
+http://www.wordware.com/files/ai
+
+This is a foundation for future experimentation, and a work in progress. It 
+contains a few band-aids where I'm working through wall collision and scoring
+issues (etc). Any errors you find are mine. If you are interested in the 
+material, I recommend Mat's book.
+
+The pause and toggle buttons are currently the only interactive elements.
+Many comments have been removed to get file size within service limits.
+
+TODO:	Fix issues with line intersections
+        Add game timer to normalize play speed accross platforms
+            change some updates to occur less frequently than every cycle
+        Extend and balance states to taste
+        change vector art to images for Codeskulptor
+        Add sound
+        Add interactivity (ability for user to control controlling_player)
+        ...
+        
+- Mike Bendele (Dec, 2013)
+
+"""
+
+import simplegui
+import codeskulptor
+import math
+import random
+import numeric
+from user26_618Q5SmZHY_1 import *
+
+# screen size
+SCW = 700
+SCH = 400
+
+# defines the size of a team -- do not adjust
+TEAM_SIZE = 5
+
+GOAL_WIDTH = 100
+
+#use to set up the support spot calculator
+NUM_SWEET_SPOTS_X 							= 13
+NUM_SWEET_SPOTS_Y 							= 6
+
+#these values tweak the various rules used to calculate the support spots
+SPOT_CAN_PASS_SCORE 						= 2.0
+SPOT_CAN_SCORE_FROM_POSITION_SCORE 			= 1.0
+SPOT_DIST_FROM_CONTROLLING_PLAYER_SCORE 	= 2.0
+SPOT_CLOSENESS_TO_SUPPORTING_PLAYER_SCORE 	= 0.0
+SPOT_AHEAD_OF_ATTACKER_SCORE 				= 0.0  
+
+#how many times per second the support spots will be calculated
+SUPPORT_SPOT_UPDATE_FREQ					= 1
+
+#the chance a player might take a random pot shot at the goal
+CHANCE_PLAYER_ATTEMPTS_POT_SHOT				= 0.005
+
+#this is the chance that a player will receive a pass using the arrive
+#steering behavior, rather than Pursuit
+CHANCE_OF_USING_ARRIVE_TYPE_RECEIVE_BEHAVIOR= 0.5
+
+BALL_SIZE									= 6.0#5.0
+BALL_MASS									= 0.7#1.0
+FRICTION									= -0.09#-0.015
+
+#the goalkeeper has to be this close to the ball to be able to interact with it
+KEEPER_IN_BALL_RANGE						= 10.0
+PLAYER_IN_TARGET_RANGE						= 10.0
+
+#player has to be this close to the ball to be able to kick it. The higher
+#the value this gets, the easier it gets to tackle. 
+PLAYER_KICKING_DIST							= BALL_SIZE+9.0 #6.0
+
+#the number of times a player can kick the ball per second
+PLAYER_KICK_FREQUENCY						= 8
+
+PLAYER_MASS									= 6.0#3.0
+PLAYER_MAX_FORCE							= 14.0#1.0
+PLAYER_MAX_SPEED_WITH_BALL					= 4.2#1.2
+PLAYER_MAX_SPEED_WITHOUT_BALL				= 5.5#1.6
+PLAYER_MAX_TURN_RATE						= 0.25#0.4
+PLAYER_SCALE								= 1.2#1.0
+
+#when an opponents comes within this range the player will attempt to pass
+#the ball. Players tend to pass more often, the higher the value
+PLAYER_COMFORT_ZONE							= 60.0
+
+#in the range zero to 1.0. adjusts the amount of noise added to a kick,
+#the lower the value the worse the players get.
+PLAYER_KICKING_ACCURACY						= 0.99
+
+#the number of times the SoccerTeam::CanShoot method attempts to find
+#a valid shot
+NUM_ATTEMPTS_TO_FIND_VALID_STRIKE			= 5
+
+CONTROL_BALL_DRIBBLE_FORCE					= 1.8#0.8
+MAX_DRIBBLE_FORCE							= 3.5#4.0#1.5
+MAX_SHOOTING_FORCE							= 7.0#10.0#6.0
+MAX_PASSING_FORCE							= 5.5#7.0#3.0
+
+#the distance away from the center of its home region a player
+#must be to be considered at home
+WITHIN_RANGE_OF_HOME						= 15.0
+
+#how close a player must get to a sweet spot before he can change state
+WITHIN_RANGE_OF_SWEET_SPOT					= 15.0
+
+#the minimum distance a receiving player must be from the passing player
+MIN_PASS_DIST								= 120.0
+
+#the minimum distance a player must be from the goalkeeper before it will
+#pass the ball
+GOAL_KEEPER_MIN_PASS_DIST					= 60.0
+
+#this is the distance the keeper puts between the back of the net 
+#and the ball when using the interpose steering behavior
+GOAL_KEEPER_TENDING_DIST					= 20.0
+
+#when the ball becomes within this distance of the goalkeeper he
+#changes state to intercept the ball
+GOAL_KEEPER_INTERCEPT_RANGE					= 100.0
+
+#how close the ball must be to a receiver before he starts chasing it
+BALL_WITHIN_RECEIVING_RANGE					= 80.0#10.0
+
+#these (boolean) values control the amount of player and pitch info shown
+#1=ON; 0=OFF
+SHOW_STATES									= 1
+SHOW_IDS									= 1
+SHOW_SUPPORT_SPOTS							= 0
+SHOW_REGIONS								= 1
+SHOW_CONTROLLING_TEAM						= 1
+SHOW_TARGETS								= 0
+SHOW_HIGHLIGHT_IF_THREATENED				= 0
+
+#simple soccer's physics are calculated using each tick as the unit of time
+#so changing this will adjust the speed
+FRAME_RATE									= 60
+
+
+SEPARATION_COEFFICIENT						= 20.0#10.0
+
+#how close a neighbour must be to be considered for separation
+VIEW_DISTANCE								= 30.0
+
+#1=ON; 0=OFF
+NON_PENETRATION_CONSTRAINT					= 0
+
+# common values squared
+BALL_WITHIN_RECEIVING_RANGE_SQ				= BALL_WITHIN_RECEIVING_RANGE * BALL_WITHIN_RECEIVING_RANGE
+KEEPER_IN_BALL_RANGE_SQ						= KEEPER_IN_BALL_RANGE * KEEPER_IN_BALL_RANGE
+PLAYER_IN_TARGET_RANGE_SQ 					= PLAYER_IN_TARGET_RANGE * PLAYER_IN_TARGET_RANGE 
+PLAYER_KICKING_DIST_SQ						= PLAYER_KICKING_DIST * PLAYER_KICKING_DIST
+PLAYER_COMFORT_ZONE_SQ						= PLAYER_COMFORT_ZONE * PLAYER_COMFORT_ZONE
+GOAL_KEEPER_INTERCEPT_RANGE_SQ				= GOAL_KEEPER_INTERCEPT_RANGE * GOAL_KEEPER_INTERCEPT_RANGE
+WITHIN_RANGE_OF_SWEET_SPOT_SQ				= WITHIN_RANGE_OF_SWEET_SPOT * WITHIN_RANGE_OF_SWEET_SPOT
+
+# counter for global time
+g_time = 0	
+
+class Regulator:
+    
+
+    def __init__(self, nuppsr):
+        
+        self.next_update_time = g_time+random.random()*1000
+        
+        if nuppsr > 0:
+            self.update_period = 1000.0 / nuppsr
+        
+        elif nuppsr == 0.0:
+            self.update_period = 0.0
+        
+        else: #nuppsr < 0
+            self.update_period = -1
+        
+    def isReady(self):
+        
+        if self.update_period == 0.0:
+            return True
+
+        if self.update_period < 0:
+            return False
+        
+        current_time = g_time
+        
+        update_period_variator = 10.0
+        
+        if current_time >= self.next_update_time:
+            self.next_update_time = current_time + self.update_period + random.randrange(-update_period_variator, update_period_variator)
+            return True
+        
+        return False
+    
+        
+class TickCounter:
+    def get_current_frame():
+        return g_time
+    
+    
+# Message type
+(MSG_RECEIVE_BALL,
+ MSG_PASS_TO_ME,
+ MSG_SUPPORT_ATTACKER,
+ MSG_GO_HOME,
+ MSG_WAIT) = range(5)
+
+messages = {MSG_RECEIVE_BALL:"Msg_ReceiveBall",
+            MSG_PASS_TO_ME:"Msg_PassToMe",
+            MSG_SUPPORT_ATTACKER:"Msg_SupportAttacker",
+            MSG_GO_HOME:"Msg_GoHome",
+            MSG_WAIT:"Msg_Wait"}
+
+# Helper function
+def message_to_string(msg):
+    
+    if not messages.has_key(msg):
+        return "INVALID MESSAGE!!"
+    else:
+        return messages[msg]
+
+    
+class EntityManager:
+    
+    
+    entity_map = dict()
+
+    def __init__(self):
+                
+        assert False, "EntityManager: should not be instantiated."
+        
+    def get_entity_from_ID(cls, _id):
+        
+        assert EntityManager.entity_map.has_key(_id), "EntityManager.get_entity_from_ID: invalid ID"
+        return EntityManager.entity_map[_id]
+
+    def remove_entity(cls, entity):
+        
+        if EntityManager.entity_map.has_key(cls, entity.ID):
+            del EntityManager.entity_map[entity.ID]
+
+    def register_entity(cls, new_entity):
+        
+        assert not EntityManager.entity_map.has_key(new_entity.ID), "Entity with ID " + str(new_entity.ID) + " has already been registered"
+        EntityManager.entity_map[new_entity.ID] = new_entity
+        
+
+EntityMgr = EntityManager
+
+
+class Telegram:
+    
+    def __init__(self, time, sender, receiver, msg, info=None):
+        
+        self.dispatch_time = float(time)
+        self.sender = sender
+        self.receiver = receiver
+        self.msg = msg
+        self.extra_info = info
+
+    def __str__(self):
+        return "Telegram: %d,%d,%d,%d,%s"%(self.dispatch_time,
+                                           self.sender,
+                                           self.receiver,
+                                           self.msg,
+                                           self.extra_info)
+        
+    def __cmp__(self, other):
+        
+        smallest_delay = 0.25
+        if math.fabs(self.dispatch_time-other.dispatch_time) < smallest_delay:
+            return 0
+        elif self.dispatch_time < other.dispatch_time:
+            return -1
+        else:
+            return 1
+
+        
+#to make code easier to read
+SEND_MSG_IMMEDIATELY = 0.0
+NO_ADDITIONAL_INFO   = 0
+SENDER_ID_IRRELEVANT = -1
+
+class MessageDispatcher:
+
+    priority_q = set()
+    
+    def __init__(self):
+        
+        assert False, "MessageDispatcher: should not be instantiated."
+        
+    def priority_q_sorted_list(cls):
+        tmp = list(MessageDispatcher.priority_q)
+        tmp.sort()
+        return tmp
+    
+    def discharge(cls, receiver, telegram):
+        
+        if not receiver.handle_message(telegram):
+            print "Message not handled"
+
+    def dispatch_msg(cls,
+                     delay,
+                     sender,
+                     receiver,
+                     msg,
+                     additional_info = None):
+        
+        #get a pointer to the receiver
+        the_receiver = EntityMgr.get_entity_from_ID(EntityManager, receiver)
+        
+        #make sure the receiver is valid
+        if the_receiver == None:
+            print "\nWarning! No Receiver with ID of " + the_receiver + " found"
+            return
+        
+        #create the telegram
+        telegram = Telegram(0, sender, receiver, msg, additional_info)
+        
+        #if there is no delay, route telegram immediately                       
+        if delay <= 0.0:
+            
+            #send the telegram to the recipient
+            MessageDispatcher.discharge(cls, the_receiver, telegram)
+            
+        #else calculate the time when the telegram should be dispatched
+        else:
+            current_time = TickCounter.get_current_frame()
+            
+            telegram.dispatch_time = current_time + delay
+            
+            #and put it in the queue
+            MessageDispatcher.priority_q.add(telegram)
+
+    def dispatch_delayed_messages(cls):
+        
+        #first get current time
+        current_time = TickCounter.get_current_frame()
+        
+        while MessageDispatcher.priority_q and \
+                MessageDispatcher.priority_q_sorted_list(cls)[0].dispatch_time < current_time and \
+                MessageDispatcher.priority_q_sorted_list(cls)[0].dispatch_time > 0:
+
+            #read the telegram from the front of the queue
+            telegram = MessageDispatcher.priority_q_sorted_list(cls)[0]
+            
+            #find the recipient
+            the_receiver = EntityMgr.get_entity_from_ID(EntityManager, telegram.receiver)
+            
+            #send the telegram to the recipient
+            MessageDispatcher.discharge(cls, the_receiver, telegram)
+            
+            #remove it from the queue
+            MessageDispatcher.priority_q = set(MessageDispatcher.priority_q_sorted_list(cls)[1:])
+
+# alias
+Dispatcher = MessageDispatcher    
+    
+        
+
+# TODO - Walls a bit overkill for this application
+#		change to something simpler
+class Wall2D:
+    def __init__(self, va=None, vb=None, vn=None):
+        self.vert_a = Vec2D() if not va else va
+        self.vert_b = Vec2D() if not vb else vb
+        if vn:
+            self.wall_norm = vn
+        else:
+            self.wall_norm = Vec2D()
+            self.calculate_normal()
+            
+    def From(self):
+        return self.vert_a
+    
+    def To(self):
+        return self.vert_b
+    
+    def calculate_normal(self):
+        temp = normalize_Vec2D(self.vert_b - self.vert_a)
+        self.wall_norm.x = -temp.y
+        self.wall_norm.y = temp.x
+        
+    def draw(self, canvas):
+        canvas.draw_line(self.vert_a.value(), self.vert_b.value(), 3, "White")
+        
+    def normal(self):
+        return self.wall_norm
+    
+    def set_normal(self, vn):
+        self.wall_norm = vn
+        
+    def center(self):
+        return (self.vert_a + self.vert_b)/2.0
+
+    
+class StateMachine:
+
+    def __init__(self, owner):
+        self.owner = owner
+        self.current_state = None
+        self.previous_state = None
+        self.global_state = None
+
+    #use these methods to initialize the FSM
+    def set_current_state(self, s): self.current_state = s
+    def set_global_state(self, s): self.global_state = s
+    def set_previous_state(self, s): self.previous_state = s
+  
+    #call this to update the FSM
+    def update(self):
+        #if a global state exists, call its execute method, else do nothing
+        if self.global_state: 
+            self.global_state.execute(self.owner)
+
+        #same for the current state
+        if self.current_state: 
+            self.current_state.execute(self.owner)
+
+    def handle_message(self, msg):
+        
+        #first see if the current state is valid and that it can handle
+        #the message
+        if self.current_state and self.current_state.on_message(self.owner, msg):
+          return True
+        
+        #if not, and if a global state has been implemented, send 
+        #the message to the global state
+        if self.global_state and self.global_state.on_message(self.owner, msg):
+          return True
+
+        return False
+
+    #change to a new state
+    def change_state(self, new_state):
+        
+        assert new_state, "<StateMachine.change_state>:trying to assign null state to current"
+        
+        #keep a record of the previous state
+        self.previous_state = self.current_state
+        
+        #call the exit method of the existing state
+        self.current_state.exit(self.owner)
+        
+        #change state to the new state
+        self.current_state = new_state
+        
+        #call the entry method of the new state
+        self.current_state.enter(self.owner)
+
+    #change state back to the previous state
+    def revert_to_previousState(self):
+        self.change_state(self.previous_state)
+
+    #returns true if the current state's type is equal to the type of the
+    #class passed as a parameter. 
+    def isInState(self, st):
+        
+        if isinstance(self.current_state, st):	#type(st)):
+            return True		#(typeid(*m_pCurrentState) == typeid(st)) return true;
+        return False
+
+    #only ever used during debugging to grab the name of the current state
+    def get_name_of_current_state(self):
+        return self.current_state.__name__
+
+    
+class Goal:
+    
+    def __init__(self, left, right, facing):
+                                                 
+        self.left_post = left
+        self.right_post = right
+        self.center = ((left+right)/2.0)
+        self.num_goals_scored = 0
+        self.facing = facing
+        
+    def reset_goals_scored(self):
+        self.num_goals_scored = 0
+
+    def scored(self, ball):
+
+        bp = ball.position+ball.velocity
+        if bp.x <= 20+BALL_SIZE and self.facing.x == 1.0:
+            if math.fabs(ball.position.y - 200) <= 50:
+                self.num_goals_scored += 1
+                return True
+        
+        elif bp.x >= SCW-20-BALL_SIZE and self.facing.x == -1.0:
+            if math.fabs(ball.position.y - 200) <= 50:
+                self.num_goals_scored += 1
+                return True
+
+        return False
+
+        
+class RegionModifier:
+    halfsize = 0
+    normal = 1
+
+    
+class Region(RegionModifier):
+    
+    def __init__(self, left=0.0, top=0.0, right=0.0, bottom=0.0, _id=-1):
+        self.top = top
+        self.right = right
+        self.left = left
+        self.bottom = bottom
+        self.ID = _id
+        self.show_ID = True
+
+    def get_width(self):
+        return math.fabs(self.right - self.left)
+    
+    def get_height(self):
+        return math.fabs(self.top - self.bottom)
+    
+    def length(self):
+        return max(self.get_width(), self.get_height())
+    
+    def breadth(self):
+        return min(self.get_width(), self.get_height())
+
+    def get_center(self):
+        return Vec2D( (self.left+self.right)*0.5, (self.top+self.bottom)*0.5 )
+    
+    def get_ID(self):
+        return self.ID
+
+    def get_random_position(self):
+        
+        return Vec2D(random.randrange(self.left, self.right),
+                     random.randrange(self.top, self.bottom))
+
+    def inside(self, pos, r=RegionModifier.normal):
+        
+        if r == RegionModifier.normal:
+            return (pos.x > self.left) and (pos.x < self.right) and \
+                    (pos.y > self.top) and (pos.y < self.bottom)
+        else:
+            margin_x = self.get_width() * 0.25
+            margin_y = self.get_height() * 0.25
+            
+            return (pos.x > (self.left+margin_x)) and (pos.x < (self.right-margin_x)) and \
+                    (pos.y > (self.top+margin_y)) and (pos.y < (self.bottom-margin_y))
+
+    def draw(self, canvas):
+        canvas.draw_polyline([[self.left,self.top], [self.right,self.top], [self.right,self.bottom], [self.left,self.bottom]], 1, "Green")
+        
+        if self.show_ID:
+            canvas.draw_text(str(self.ID), self.get_center().value(), 20, 'Green')
+
+
+class SupportSpot:
+    
+    def __init__(self, pos, score):
+        self.position = pos
+        self.score = score
+        
+        
+class SupportSpotCalculator:
+    
+    def __init__(self, num_x, num_y, team):
+        
+        self.best_supporting_spot = None
+        self.team = team
+        self.spots = []
+
+        playing_field = team.pitch.playing_area
+        
+        #calculate the positions of each sweet spot, create them and 
+        #store them in m_Spots
+        height_of_ss_region = playing_field.get_height() * 0.8
+        width_of_ss_region  = playing_field.get_width() * 0.9
+        slice_x = width_of_ss_region / num_x
+        slice_y = height_of_ss_region / num_y
+        
+        left  = playing_field.left + (playing_field.get_width()-width_of_ss_region)/2.0 + slice_x/2.0
+        right = playing_field.right - (playing_field.get_width()-width_of_ss_region)/2.0 - slice_x/2.0
+        top   = playing_field.top + (playing_field.get_height()-height_of_ss_region)/2.0 + slice_y/2.0
+
+        for x in range((num_x/2)-1):
+            for y in range(num_y): 
+                if self.team.color == SoccerTeam.blue:
+                    self.spots.append(SupportSpot(Vec2D(left+x*slice_x, top+y*slice_y), 0.0))
+                
+                else:
+                    self.spots.append(SupportSpot(Vec2D(right-x*slice_x, top+y*slice_y), 0.0))
+            
+        #create the regulator
+        self.regulator = Regulator(SUPPORT_SPOT_UPDATE_FREQ)
+
+    def determine_best_supporting_position(self):
+        
+        #only update the spots every few frames                              
+        if not self.regulator.isReady() and self.best_supporting_spot:
+            return self.best_supporting_spot.position
+        
+        #reset the best supporting spot
+        self.best_supporting_spot = None
+        
+        best_score_so_far = 0.0
+        
+        for curSpot in self.spots:
+
+            curSpot.score = 1.0
+            
+            #Test 1. is it possible to make a safe pass from the ball's position 
+            #to this position?
+            if self.team.isPassSafeFromAllOpponents(self.team.controlling_player.position,
+                                                    curSpot.position,
+                                                    None,
+                                                    MAX_PASSING_FORCE):
+                curSpot.score += SPOT_CAN_PASS_SCORE
+
+            #Test 2. Determine if a goal can be scored from this position.  
+            if self.team.can_shoot(curSpot.position, MAX_SHOOTING_FORCE):
+                curSpot.score += SPOT_CAN_SCORE_FROM_POSITION_SCORE
+            
+            #Test 3. 
+            if self.team.supporting_player:
+                optimal_distance = 200.0
+                
+                dist = distance_Vec2D(self.team.controlling_player.position, curSpot.position)
+                
+                temp = math.fabs(optimal_distance - dist)
+                
+                if temp < optimal_distance:
+                    #normalize the distance and add it to the score
+                    curSpot.score += SPOT_DIST_FROM_CONTROLLING_PLAYER_SCORE * \
+                                     (optimal_distance-temp)/optimal_distance  
+        
+            #check to see if this spot has the highest score so far
+            if curSpot.score > best_score_so_far:
+                best_score_so_far = curSpot.score
+                self.best_supporting_spot = curSpot
+        
+        return self.best_supporting_spot.position
+
+    def get_best_supporting_spot(self):
+        
+        if self.best_supporting_spot:
+            return self.best_supporting_spot.position
+        
+        else:
+            return self.determine_best_supporting_position()
+
+    def draw(self, canvas):
+        
+        for spt in self.spots:
+            rad = spt.score if spt.score > 0.0 else .1
+            rad *= 3
+            canvas.draw_circle(spt.position.value(), rad, 1, "Grey")# DEBUG
+            pass
+        
+        if self.best_supporting_spot:
+            canvas.draw_circle(self.best_supporting_spot.position.value(), self.best_supporting_spot.score, 1, "Green")
+
+
+class BehaviorType:
+    none               = 0x0000
+    seek               = 0x0001
+    arrive             = 0x0002
+    separation         = 0x0004
+    pursuit            = 0x0008
+    interpose          = 0x0010
+
+    
+class Deceleration:
+    
+    slow = 3
+    normal = 2
+    fast = 1
+
+    
+class SteeringBehaviors:
+    
+    def __init__(self, agent, world, ball):
+                               
+        self.player = agent
+        self.flags = 0
+        self.mult_separation = SEPARATION_COEFFICIENT
+        self.tagged = False
+        self.view_distance = VIEW_DISTANCE
+        self.ball = ball
+        self.interpose_dist = 0.0
+        self.antenna = []
+        self.steering_force = Vec2D()
+        self.target = None
+
+    def isOn(self, behavior_type):
+        
+        return (self.flags & behavior_type) == behavior_type
+
+    def force(self):
+        return self.steering_force
+
+    def set_target(self, t):
+        
+        self.target = t
+
+    def set_interpose_distance(self, d):
+        
+        self.interpose_dist = d
+
+    def tag(self):
+        self.tagged = True
+        
+    def un_tag(self):
+        self.tagged = False
+  
+    def seek_on(self): self.flags |= BehaviorType.seek
+    def arrive_on(self): self.flags |= BehaviorType.arrive
+    def pursuit_on(self): self.flags |= BehaviorType.pursuit
+    def separation_on(self): self.flags |= BehaviorType.separation
+    def interpose_on(self, d):
+        
+        self.flags |= BehaviorType.interpose
+        self.interpose_dist = d
+
+    def seek_off(self):
+        if self.isOn(BehaviorType.seek):
+            self.flags ^= BehaviorType.seek
+            
+    def arrive_off(self):
+        if self.isOn(BehaviorType.arrive):
+            self.flags ^= BehaviorType.arrive
+            
+    def pursuit_off(self):
+        if self.isOn(BehaviorType.pursuit):
+            self.flags ^= BehaviorType.pursuit
+            
+    def separation_off(self):
+        if self.isOn(BehaviorType.separation):
+            self.flags ^= BehaviorType.separation
+            
+    def interpose_off(self):
+        if self.isOn(BehaviorType.interpose):
+            self.flags ^= BehaviorType.interpose
+
+    def seek_is_on(self): return self.isOn(BehaviorType.seek)
+    def arrive_is_on(self): return self.isOn(BehaviorType.arrive)
+    def pursuit_is_on(self): return self.isOn(BehaviorType.pursuit)
+    def separation_is_on(self): return self.isOn(BehaviorType.separation)
+    def interpose_is_on(self): return self.isOn(BehaviorType.interpose)
+
+    def accumulate_force(self, sf, force_to_add):
+        
+        #first calculate how much steering force we have left to use
+        magnitude_so_far = sf.length()
+        
+        magnitude_remaining = self.player.max_force - magnitude_so_far
+        
+        #return false if there is no more force left to use
+        if magnitude_remaining <= 0.0: return False
+        
+        #calculate the magnitude of the force we want to add
+        magnitude_to_add = force_to_add.length()
+        
+        #now calculate how much of the force we can really add  
+        if magnitude_to_add > magnitude_remaining:
+            magnitude_to_add = magnitude_remaining
+        
+        #add it to the steering force
+        sf += normalize_Vec2D(force_to_add) * magnitude_to_add 
+        
+        return True
+
+    def calculate(self):
+                                                                      
+        #reset the force
+        self.steering_force.zero()
+        
+        #this will hold the value of each individual steering force
+        self.steering_force = self.sum_forces()
+        
+        #make sure the force doesn't exceed the vehicles maximum allowable
+        self.steering_force.truncate(self.player.max_force)
+        
+        return self.steering_force
+
+    def sum_forces(self):
+        
+        force = Vec2D()
+        
+        #the soccer players must always tag their neighbors
+        self.find_neighbours()
+        
+        if self.isOn(BehaviorType.separation):
+            force += self.separation() * self.mult_separation
+            if not self.accumulate_force(self.steering_force, force): 
+                return self.steering_force
+        
+        if self.isOn(BehaviorType.seek):
+            force += self.seek(self.target)
+            if not self.accumulate_force(self.steering_force, force):
+                return self.steering_force
+        
+        if self.isOn(BehaviorType.arrive):
+            force += self.arrive(self.target, Deceleration.fast)
+            if not self.accumulate_force(self.steering_force, force):
+                return self.steering_force
+        
+        if self.isOn(BehaviorType.pursuit):
+            force += self.pursuit(self.ball)
+            if not self.accumulate_force(self.steering_force, force):
+                return self.steering_force
+        
+        if self.isOn(BehaviorType.interpose):
+            force += self.interpose(self.ball, self.target, self.interpose_dist)
+            if not self.accumulate_force(self.steering_force, force):
+                return self.steering_force
+        
+        return self.steering_force
+
+    def forward_component(self):
+        
+        return self.player.heading.dot(self.steering_force)
+
+    def side_component(self):
+        
+        return self.player.v_side.dot(self.steering_force) * self.player.max_turn_rate
+
+    def seek(self, target):
+        
+        desired_velocity = normalize_Vec2D(target - self.player.position) * self.player.max_speed
+        return desired_velocity - self.player.velocity
+
+    def arrive(self, target, deceleration):
+        
+        to_target = target - self.player.position
+        
+        #calculate the distance to the target
+        dist = to_target.length()
+        
+        if dist > 0:
+            deceleration_tweaker = 0.3
+            
+            #calculate the speed required to reach the target given the desired
+            #deceleration
+            speed =  dist / (float(deceleration) * deceleration_tweaker)
+            
+            #make sure the velocity does not exceed the max
+            speed = min(speed, self.player.max_speed)
+            
+            desired_velocity = to_target * speed / dist
+            
+            return desired_velocity - self.player.velocity
+        
+        return Vec2D()
+
+    def pursuit(self, ball):
+        
+        to_ball = ball.position - self.player.position
+        
+        #the lookahead time is proportional to the distance between the ball
+        #and the pursuer; 
+        look_ahead_time = 0.0
+        
+        if ball.speed() != 0.0:
+            look_ahead_time = to_ball.length() / ball.speed()
+        
+        #calculate where the ball will be at this time in the future
+        self.target = ball.future_position(look_ahead_time)
+        
+        #now seek to the predicted future position of the ball
+        return self.arrive(self.target, Deceleration.fast)
+
+    def find_neighbours(self):
+        
+        all_players = self.player.team.players + self.player.team.opponents.players
+
+        for plyr in all_players:
+            #first clear any current tag
+            plyr.steering.un_tag()
+            
+            #work in distance squared to avoid sqrts
+            to = plyr.position - self.player.position
+            
+            if to.length_sq() < (self.view_distance * self.view_distance):
+                plyr.steering.tag()
+
+    def separation(self):
+        
+        #iterate through all the neighbors and calculate the vector from the
+        steering_force = Vec2D()
+        
+#        all_players = PlayerBase.get_all_members()
+        all_players = self.player.team.players + self.player.team.opponents.players
+
+        for plyr in all_players:
+            #make sure this agent isn't included in the calculations and that
+            #the agent is close enough
+            if plyr != self.player and plyr.steering.tagged:
+                to_agent = self.player.position - plyr.position
+                
+                #scale the force inversely proportional to the agents distance  
+                #from its neighbor.
+                steering_force += normalize_Vec2D(to_agent)/to_agent.length()
+        
+        return steering_force
+
+    def interpose(self, ball, target, dist_from_target):
+        
+        return self.arrive(target + normalize_Vec2D(ball.position - target) * dist_from_target, Deceleration.normal)
+
+    def render_aids(self, canvas):
+        #render the steering force
+        canvas.draw_line(self.player.position, self.player.position + self.steering_force * 20, 1, "Red")
+
+
+DEFAULT_ENTITY_TYPE = -1
+class BaseEntity:
+    next_ID = 0
+    
+    def __init__(self, entity_type=DEFAULT_ENTITY_TYPE, pos=Vec2D(1,1), radius=0.0):
+        self.entity_type = entity_type
+        self.position = pos
+        self.bound_radius = radius
+        self.ID = self.next_valid_ID()
+        self.scale = Vec2D(1,1)
+        self.tag = False
+        
+    def next_valid_ID(cls):
+        my_id = BaseEntity.next_ID
+        BaseEntity.next_ID += 1
+        return my_id
+    
+    def set_position(self, new_pos):
+        self.position = Vec2D(new_pos)
+        
+    def set_bound_radius(self, r):
+        self.bound_radius = float(r)
+        
+    def isTagged(self):
+        return self.tag
+    
+    def set_tag(self, t=True):
+        self.tag = t
+        
+    def set_scale(self, val):
+        if isinstance(val, type(Vec2D())):
+            self.bound_radius *= max(val.x, val.y)/max(self.scale.x, self.scale.y)
+            self.scale = val
+        else:
+            self.bound_radius *= (val/max(self.scale.x, self.scale.y))
+            self.scale = Vec2D(val, val) 
+            
+    def set_entity_type(self, new_type):
+        self.entity_type = new_type
+        
+    def update(self, time_elapsed):
+        pass
+    
+    def draw(self, canvas):
+        pass
+
+    
+class MovingEntity(BaseEntity):
+    
+    def __init__(self,
+                 position, 
+                 radius, 
+                 vel, 
+                 max_speed, 
+                 heading, 
+                 mass, 
+                 scale, 
+                 turn_rate, 
+                 max_force):       
+        BaseEntity.__init__(self, 0, position, radius)
+        self.heading = Vec2D(heading)
+        self.velocity = Vec2D(vel)
+        self.mass = float(mass)
+        self.v_side = self.heading.perp()
+        self.max_speed = float(max_speed)
+        self.max_turn_rate = turn_rate
+        self.max_force = max_force
+        self.scale = Vec2D(scale)
+        
+    def set_velocity(self, new_vel):
+        self.velocity = Vec2D(new_vel)
+        
+    def set_max_speed(self, new_speed):
+        self.max_speed = float(new_speed)
+        
+    def set_max_force(self, mf):
+        self.max_force = float(mf)
+        
+    def max_turn_rate(self):
+        
+        return self.max_turn_rate
+    
+    def set_max_turn_rate(self, val):
+        
+        self.max_turn_rate = float(val)
+        
+    def isSpeedMaxedOut(self):
+        return self.max_speed*self.max_speed >= self.velocity.length_sq()
+    
+    def speed(self):
+        return self.velocity.length()
+    
+    def speed_sq(self):
+        return self.velocity.length_sq()
+    
+    def set_heading(self, new_heading):
+        new_heading = Vec2D(new_heading)	# make sure is a Vec2D
+        if (new_heading.length_sq() - 1.0) < 0.00001:
+            self.heading = new_heading
+            self.v_side = self.heading.perp()
+            
+    def rotate_heading_to_face_position(self, target):  
+        target = Vec2D(target)
+        to_target = (target - self.position).normalize()
+        angle = math.acos(self.heading * to_target)
+        cw = 1 if (self.heading.sign(to_target) >= 0) else -1
+#        cw = self.heading.sign(to_target)
+        if angle < 0.0001: return True
+        if angle > self.max_turn_rate: angle = self.max_turn_rate  
+        x2 = self.heading.x*math.cos(angle)-self.heading.y*cw*math.sin(angle)
+        y2 = self.heading.x*cw*math.sin(angle)+self.heading.y*math.cos(angle)
+        self.set_heading(Vec2D(x2,y2))
+        self.velocity = self.velocity.length() * self.heading
+        return False
+
+    
+# Helper Functions
+def add_noise_to_kick(ball_pos, ball_target):
+    
+    displacement = (math.pi - math.pi*PLAYER_KICKING_ACCURACY) * random_clamped()
+    to_target = ball_target - ball_pos
+    
+    rotate_around_origin_Vec2D(to_target, displacement)
+    return to_target + ball_pos
+    
+
+class SoccerBall(MovingEntity):
+    
+    
+    def __init__(self, pos, ball_size, mass, pitch_boundary):
+        
+        MovingEntity.__init__(self, 
+                              pos,
+                              ball_size,
+                              Vec2D(),
+                              -1.0,             #max speed - unused
+                              Vec2D(0,1),
+                              mass,
+                              Vec2D(1.0,1.0),   #scale     - unused
+                              0,                #turn rate - unused
+                              0)                #max force - unused
+        
+        self.pitch_boundary = pitch_boundary
+        self.old_pos = Vec2D(pos)
+                                     
+    #a soccer ball doesn't need to handle messages
+    def handle_message(self, msg): return False
+
+    def trap(self):
+        
+        self.velocity.zero()  
+    
+    def kick(self, direction, force):
+        
+        #calculate the acceleration
+        acceleration = (normalize_Vec2D(direction) * force) / self.mass
+        
+        #update the velocity
+        self.velocity = acceleration
+
+    def update(self):
+        
+        
+        if math.fabs(self.position.x-350) > 290: game.check_for_score()	# DEBUG
+        
+        #keep a record of the old position so the goal::scored method
+        #can utilize it for goal testing
+        self.old_pos = self.position
+        
+        
+        
+        #Test for collisions
+        self.test_collision_with_walls(self.pitch_boundary)
+        
+        #Simulate friction. Make sure the speed is positive 
+        if self.velocity.length_sq() > FRICTION * FRICTION:
+            self.velocity += (normalize_Vec2D(self.velocity) * FRICTION)
+            # force ball in bounds		# DEBUG - wall collision code failing sometimes
+            if self.position.x > SCW - 20 or self.position.x < 20:
+                self.velocity.reflect(Vec2D(1,0))
+            self.position += self.velocity
+
+            #update heading
+            self.heading = normalize_Vec2D(self.velocity)
+
+    def time_to_cover_distance(self, A, B, force):
+        
+        #this will be the velocity of the ball in the next time step *if*
+        #the player was to make the pass. 
+        speed = force / self.mass
+        
+        distance_to_cover =  distance_Vec2D(A, B)
+        
+        term = speed*speed + 2.0*distance_to_cover*FRICTION
+        
+        #if  (u^2 + 2as) is negative it means the ball cannot reach point B.
+        if term <= 0.0: return -1.0
+        
+        v = math.sqrt(term)
+        
+        return (v-speed)/FRICTION
+
+    def future_position(self, time):
+        
+        #calculate the ut term, which is a vector
+        ut = self.velocity * time
+        
+        #calculate the 1/2at^2 term, which is scalar
+        half_a_t_squared = 0.5 * FRICTION * time * time
+        
+        #turn the scalar quantity into a vector by multiplying the value with
+        #the normalized velocity vector (because that gives the direction)
+        scalar_to_vector = half_a_t_squared * normalize_Vec2D(self.velocity)
+        
+        #the predicted position is the balls position plus these two terms
+        return self.position + ut + scalar_to_vector
+
+    def draw(self, canvas):
+        
+        canvas.draw_circle(self.position.value(), self.bound_radius, 1, "Black", "Black")
+
+    def test_collision_with_walls(self, walls):
+    
+        #test ball against each wall, find out which is closest
+        idx_closest = -1
+        
+        vel_normal = normalize_Vec2D(self.velocity)
+        
+#        Vector2D IntersectionPoint, CollisionPoint;
+        intersection_point = Vec2D()
+        collision_point = Vec2D()
+        
+        dist_to_intersection = float('inf')
+        
+        for w in range(len(walls)):
+
+            this_collision_point = self.position - (walls[w].normal() * self.bound_radius)
+            
+            #calculate exactly where the collision point will hit the plane    
+            if where_is_point(this_collision_point,
+                             walls[w].From(),
+                             walls[w].normal()) == SpanType.plane_backside:
+                dist_to_wall = distance_to_ray_plane_intersection(this_collision_point,
+                                                                 walls[w].normal(),
+                                                                 walls[w].From(),
+                                                                 walls[w].normal())
+                
+                intersection_point = this_collision_point + (dist_to_wall * walls[w].normal())
+              
+
+            else:
+                dist_to_wall = distance_to_ray_plane_intersection(this_collision_point,
+                                                                 vel_normal,
+                                                                 walls[w].From(),
+                                                                 walls[w].normal())
+                
+                intersection_point = this_collision_point + (dist_to_wall * vel_normal)
+
+    
+            #check to make sure the intersection point is actually on the line
+            #segment
+            on_line_segment = False
+            
+#            if (line_intersection_2D(walls[w].From(),		# DEBUG 
+            if (line_intersection_2D_alt(walls[w].From(),
+                                   walls[w].To(),
+                                   this_collision_point - walls[w].normal()*20.0,
+                                   this_collision_point + walls[w].normal()*20.0)):
+            
+                on_line_segment = True
+  
+            dist_sq = distance_sq_Vec2D(this_collision_point, intersection_point)
+            
+            if dist_sq <= self.velocity.length_sq() and dist_sq < dist_to_intersection and on_line_segment:           
+                dist_to_intersection = dist_sq
+                idx_closest = w
+                collision_point = intersection_point
+                
+        if idx_closest >= 0 and vel_normal.dot(walls[idx_closest].normal()) < 0:
+            self.velocity.reflect(walls[idx_closest].normal())  
+
+    def place_at_position(self, new_pos):
+        
+        self.position = new_pos
+        self.old_pos = self.position
+        self.velocity.zero()
+
+        
+# Helper functions
+def sort_by_distance_to_opponentsGoal(p1, p2):
+    
+    return p1.dist_to_opp_goal() < p2.dist_to_opp_goal()
+
+
+def sort_by_reversed_distance_to_opponents_goal(p1, p2):
+    
+    return p1.dist_to_opp_goal() > p2.dist_to_opp_goal()
+
+
+class PlayerRole:
+    goal_keeper = 0
+    attacker = 1
+    defender = 2
+
+class PlayerBase(MovingEntity, PlayerRole):
+
+    def __init__(self,
+                 home_team,
+                 home_region,
+                 heading,
+                 velocity,
+                 mass,
+                 max_force,
+                 max_speed,
+                 max_turn_rate,
+                 scale,
+                 role):
+         
+        MovingEntity.__init__(self,
+                             home_team.pitch.get_region_from_index(home_region).get_center(),
+                             scale*10.0,
+                             velocity,
+                             max_speed,
+                             heading,
+                             mass,
+                             Vec2D(scale,scale),
+                             max_turn_rate,
+                             max_force)
+        
+        self.team = home_team
+        self.dist_sq_to_ball = float('inf')
+        self.home_region = home_region
+        self.default_region = home_region
+        self.player_role = role
+        self.vec_player_VB = []
+  
+        #setup the vertex buffers and calculate the bounding radius
+        num_player_verts = 4
+        player = [Vec2D(-3, 8),
+                  Vec2D(3,10),
+                  Vec2D(3,-10),
+                  Vec2D(-3,-8)]
+
+        for vtx in range(num_player_verts):
+            self.vec_player_VB.append(player[vtx])
+            
+            #set the bounding radius to the length of the 
+            #greatest extent
+            if abs(player[vtx].x) > self.bound_radius:
+                self.bounding_radius = abs(player[vtx].x)
+            
+            if abs(player[vtx].y) > self.bound_radius:
+                self.bounding_radius = abs(player[vtx].y)
+
+        #set up the steering behavior class
+        self.steering = SteeringBehaviors(self,
+                                          self.get_pitch(),
+                                          self.get_ball())  
+  
+        #a player's start target is its start position (because it's just waiting)
+        self.steering.set_target(home_team.pitch.get_region_from_index(home_region).get_center())
+
+    def dist_sq_to_ball(self):
+        return self.dist_sq_to_ball
+    
+    def set_dist_sq_to_ball(self, val):
+        self.dist_sq_to_ball = val
+
+    def set_default_home_region(self):
+        self.home_region = self.default_region
+
+    def steering(self):
+        return self.steering
+    
+    def set_home_region(self, new_region):
+        self.home_region = new_region
+        
+    def get_team(self):
+        return self.team
+  
+    def track_ball(self):
+        
+        self.rotate_heading_to_face_position(self.get_ball().position)  
+        
+    def track_target(self):
+        
+        self.set_heading(normalize_Vec2D(self.steering.target() - self.position))
+
+    def position_in_front_of_player(self, position):
+        
+        to_subject = position - self.position
+        
+        if to_subject.dot(self.heading) > 0:
+            return True
+        else:
+            return False
+
+    def isThreatened(self):
+        
+        #check against all opponents to make sure non are within this
+        #player's comfort zone
+        
+        for cur_opp in self.team.opponents.players:
+            #calculate distance to the player. if dist is less than our
+            #comfort zone, and the opponent is infront of the player, return true
+            if self.position_in_front_of_player(cur_opp.position) and distance_sq_Vec2D(self.position, cur_opp.position) < PLAYER_COMFORT_ZONE_SQ:     
+                return True
+            
+        # next opp
+        
+        return False
+
+    def find_support(self):
+            
+        #if there is no support we need to find a suitable player.
+        if not self.team.isInControl(): return	# DEBUG
+        if self.team.supporting_player == None:
+            best_support_ply = self.team.determine_best_supporting_attacker()
+
+            self.team.set_supporting_player(best_support_ply)
+
+            assert self.team.supporting_player, str(self.team._name())+str(self.team.get_FSM().current_state)	# DEBUG
+            Dispatcher.dispatch_msg(Dispatcher,
+                                    SEND_MSG_IMMEDIATELY,
+                                    self.ID,
+                                    self.team.supporting_player.ID,
+                                    MSG_SUPPORT_ATTACKER,
+                                    None)
+    
+        best_support_ply = self.team.determine_best_supporting_attacker()
+        
+        if best_support_ply and best_support_ply != self.team.supporting_player:
+            if self.team.supporting_player:
+                Dispatcher.dispatch_msg(Dispatcher,
+                                        SEND_MSG_IMMEDIATELY,
+                                        self.ID,
+                                        self.team.supporting_player.ID,
+                                        MSG_GO_HOME,
+                                        None)
+            
+            self.team.set_supporting_player(best_support_ply)
+            
+            Dispatcher.dispatch_msg(Dispatcher,
+                                    SEND_MSG_IMMEDIATELY,
+                                    self.ID,
+                                    self.team.supporting_player.ID,
+                                    MSG_SUPPORT_ATTACKER,
+                                    None)
+
+    def dist_to_opp_goal(self):
+        
+        return math.fabs(self.position.x - self.team.opponents_goal.center().x)
+
+    def dist_to_home_goal(self):
+        return math.fabs(self.position.x - self.team.home_goal.center().x)
+
+    def isControllingPlayer(self):
+        return self.team.controlling_player is self
+
+    def ball_within_keeper_range(self):
+        return (distance_sq_Vec2D(self.position, self.get_ball().position) < KEEPER_IN_BALL_RANGE_SQ)
+
+    def ball_within_receiving_range(self):
+        return (distance_sq_Vec2D(self.position, self.get_ball().position) < BALL_WITHIN_RECEIVING_RANGE_SQ)
+
+    def ball_within_kicking_range(self):
+        return (distance_sq_Vec2D(self.get_ball().position, self.position) < PLAYER_KICKING_DIST_SQ)
+
+    def in_home_region(self):
+        if self.player_role == PlayerRole.goal_keeper:
+            return self.get_pitch().get_region_from_index(self.home_region).inside(self.position, Region.normal)
+        else:
+            return self.get_pitch().get_region_from_index(self.home_region).inside(self.position, Region.halfsize)
+
+    def at_target(self):
+        return (distance_sq_Vec2D(self.position, self.steering.target) < PLAYER_IN_TARGET_RANGE_SQ)
+
+    def isClosestTeamMemberToBall(self):
+        return self.team.player_closest_to_ball is self
+    
+    def isClosestPlayerOnPitchToBall(self):
+        return self.isClosestTeamMemberToBall() and (self.dist_sq_to_ball < self.team.opponents.closest_dist_to_ball_sq())
+
+    def in_hot_region(self):
+        return math.fabs(self.position.y - self.team.opponents_goal.center.y ) < self.get_pitch().playing_area.length()/3.0
+
+    def isAheadOfAttacker(self):
+        return math.fabs(self.position.x - self.team.opponents_goal.center.x) < \
+             math.fabs(self.team.controlling_player.position.x - self.team.opponents_goal.center.x)
+
+    def get_ball(self):
+        return self.team.pitch.ball
+
+    def get_pitch(self):
+        return self.team.pitch
+
+    def get_home_region(self):
+        return self.get_pitch().get_region_from_index(self.home_region)
+
+
+#TODO - make GoalKeeperStates a module and add 'cls' to all class methods
+class GoalKeeperStates:
+
+    class GlobalKeeperState:
+        __name__ = "GlobalKeeperState"
+    
+        def enter(keeper): pass
+        def execute(keeper): pass
+        def exit(keeper): pass
+    
+        def on_message(keeper, telegram):
+            if telegram.msg == MSG_GO_HOME:
+                keeper.set_default_home_region()
+                keeper.get_FSM().change_state(GoalKeeperStates.ReturnHome)
+                return True
+                
+            elif telegram.msg == MSG_RECEIVE_BALL:
+                keeper.get_FSM().change_state(GoalKeeperStates.InterceptBall)
+                return True
+                
+            return False
+    
+    
+    class TendGoal:
+        
+        __name__ = "TendGoal"
+            
+        def enter(keeper):
+            #turn interpose on
+            keeper.steering.interpose_on(GOAL_KEEPER_TENDING_DIST)
+            
+            #interpose will position the agent between the ball position and a target
+            #position situated along the goal mouth. This call sets the target
+            keeper.steering.set_target(keeper.get_rear_interpose_target())
+    
+        def execute(keeper):
+            #the rear interpose target will change as the ball's position changes
+            #so it must be updated each update-step 
+            keeper.steering.set_target(keeper.get_rear_interpose_target())
+            
+            #if the ball comes in range the keeper traps it and then changes state
+            #to put the ball back in play
+            if keeper.ball_within_keeper_range():
+                keeper.get_ball().trap()
+                keeper.get_pitch().set_goal_keeper_has_ball(True)
+                keeper.get_FSM().change_state(GoalKeeperStates.PutBallBackInPlay)
+                return
+    
+            #if ball is within a predefined distance, the keeper moves out from
+            #position to try and intercept it.
+            if keeper.ball_within_range_for_intercept() and not keeper.team.isInControl():
+                keeper.get_FSM().change_state(GoalKeeperStates.InterceptBall)
+            
+            #if the keeper has ventured too far away from the goal-line and there
+            #is no threat from the opponents he should move back towards it
+            if keeper.too_far_from_goal_mouth() and keeper.team.isInControl():
+                keeper.get_FSM().change_state(GoalKeeperStates.ReturnHome)
+                return
+    
+        def exit(keeper):
+            keeper.steering.interpose_off()
+    
+        def on_message(keeper, msg): return False
+    
+    
+    class InterceptBall:
+        
+        __name__ = "InterceptBall"
+    
+        def enter(keeper):
+            keeper.steering.pursuit_on()
+    
+        def execute(keeper):            
+            #if the goalkeeper moves to far away from the goal he should return to his
+            #home region UNLESS he is the closest player to the ball, in which case,
+            #he should keep trying to intercept it.
+            if keeper.too_far_from_goal_mouth() and not keeper.isClosestPlayerOnPitchToBall():
+                keeper.get_FSM().change_state(GoalKeeperStates.ReturnHome)
+                return
+            
+            #if the ball becomes in range of the goalkeeper's hands he traps the 
+            #ball and puts it back in play
+            if keeper.ball_within_keeper_range():
+                keeper.get_ball().trap()
+                keeper.get_pitch().set_goal_keeper_has_ball(True)
+                keeper.get_FSM().change_state(GoalKeeperStates.PutBallBackInPlay)
+                return
+    
+        def exit(keeper):
+            keeper.steering.pursuit_off()
+    
+        def on_message(keeper, msg): return False
+    
+    
+    class ReturnHome:
+        
+        __name__ = "ReturnHome"
+    
+        def enter(keeper):
+            keeper.steering.arrive_on()
+    
+        def execute(keeper):
+            keeper.steering.set_target(keeper.get_home_region().get_center())
+            
+            #if close enough to home or the opponents get control over the ball,
+            #change state to tend goal
+            if keeper.in_home_region() or not keeper.team.isInControl():
+                keeper.get_FSM().change_state(GoalKeeperStates.TendGoal)
+    
+        def exit(keeper):
+            keeper.steering.arrive_off()
+    
+        def on_message(keeper, msg): return False
+    
+    
+    class PutBallBackInPlay:
+        __name__ = "PutBallBackInPlay"
+    
+        def exit(keeper): pass
+    
+        def enter(keeper):
+            #let the team know that the keeper is in control
+            keeper.team.set_controlling_player(keeper)
+            
+            #send all the players home
+            keeper.team.opponents.return_all_field_players_to_home()
+            keeper.team.return_all_field_players_to_home()
+    
+        def execute(keeper):
+            receiver = None
+            ball_target = Vec2D()
+            
+            #test if there are players further forward on the field we might
+            #be able to pass to. If so, make a pass.
+
+            did_find, rcvr, pass_targ = keeper.team.find_pass(keeper,
+                                     receiver,
+                                     ball_target,
+                                     MAX_PASSING_FORCE,
+                                     GOAL_KEEPER_MIN_PASS_DIST)
+            if did_find:
+                #make the pass  
+#                keeper.get_ball().kick(normalize_Vec2D(ball_target - keeper.get_ball().position), Prm.max_passing_force)
+                keeper.get_ball().kick(normalize_Vec2D(pass_targ - keeper.get_ball().position), MAX_PASSING_FORCE)
+                
+                #goalkeeper no longer has ball 
+                keeper.get_pitch().set_goal_keeper_has_ball(False)
+                
+                #let the receiving player know the ball's comin' at him
+                Dispatcher.dispatch_msg(Dispatcher,
+                                        SEND_MSG_IMMEDIATELY,
+                                        keeper.ID,
+                                        rcvr.ID,
+                                        MSG_RECEIVE_BALL,
+                                        pass_targ)
+                
+                #go back to tending the goal   
+                keeper.get_FSM().change_state(GoalKeeperStates.TendGoal)
+                return
+            
+            keeper.set_velocity(Vec2D())
+    
+        def on_message(keeper, msg): return False
+
+        
+class GoalKeeper(PlayerBase):
+    
+    def __init__(self,
+                 home_team,
+                 home_region,
+                 start_state,
+                 heading,
+                 velocity,
+                 mass,
+                 max_force,
+                 max_speed,
+                 max_turn_rate,
+                 scale):
+        
+        PlayerBase.__init__(self,
+                            home_team,
+                            home_region,
+                            heading,
+                            velocity,
+                            mass,
+                            max_force,
+                            max_speed,
+                            max_turn_rate,
+                            scale,
+                            PlayerBase.goal_keeper)
+                                          
+        #set up the state machine
+        self.state_machine = StateMachine(self)		# <GoalKeeper>
+        
+        self.state_machine.set_current_state(start_state)
+        self.state_machine.set_previous_state(start_state)
+        self.state_machine.set_global_state(GoalKeeperStates.GlobalKeeperState)
+        
+        self.state_machine.current_state.enter(self)        
+
+    def get_FSM(self):
+        return self.state_machine
+
+    def get_look_at(self):
+        return self.look_at
+
+    def set_look_at(self, v):
+        
+        self.look_At = v
+
+    def update(self):
+        #run the logic for the current state
+        self.state_machine.update()
+
+        #calculate the combined force from each steering behavior 
+        steering_force = self.steering.calculate()
+
+        #Acceleration = Force/Mass
+        acceleration = steering_force / self.mass
+
+        #update velocity
+        self.velocity += acceleration
+        
+        #make sure player does not exceed maximum velocity
+        self.velocity.truncate(self.max_speed)
+        
+        #update the position
+        self.position += self.velocity
+
+        #enforce a non-penetration constraint if desired
+        if NON_PENETRATION_CONSTRAINT:
+            enforce_non_penetration_constraint(self, self.team.players+self.team.opponents.players)
+        
+        #update the heading if the player has a non zero velocity
+        if not self.velocity.isZero():
+            self.heading = normalize_Vec2D(self.velocity)
+            self.v_side = self.heading.perp()
+        
+        #look-at vector always points toward the ball
+        if not self.get_pitch().goal_keeper_has_ball:
+            self.look_at = normalize_Vec2D(self.get_ball().position - self.position)
+
+    def ball_within_range_for_intercept(self):
+        return (distance_sq_Vec2D(self.team.home_goal.center, self.get_ball().position) <= GOAL_KEEPER_INTERCEPT_RANGE_SQ)
+
+    def too_far_from_goal_mouth(self):
+        return (distance_sq_Vec2D(self.position, self.get_rear_interpose_target()) > GOAL_KEEPER_INTERCEPT_RANGE_SQ)
+
+    def get_rear_interpose_target(self):
+        
+        x_pos_target = self.team.home_goal.center.x
+
+        y_pos_target = self.get_pitch().playing_area.get_center().y - GOAL_WIDTH*0.5 + \
+                         (self.get_ball().position.y*GOAL_WIDTH) / self.get_pitch().playing_area.get_height()
+        
+        return Vec2D(x_pos_target, y_pos_target)
+    
+    def handle_message(self, msg):
+        
+        return self.state_machine.handle_message(msg)
+    
+    def draw(self, canvas):                                         
+        if self.team.color == SoccerTeam.blue:
+#            col = "Blue"
+            hair_col = "Blue"
+        else:
+#            col = "Red"
+            hair_col = "Red"
+        col = "Black"
+        self.vec_player_VB_trans = world_transform(self.vec_player_VB,
+                                                   self.position,
+                                                   self.look_at,
+                                                   self.look_at.perp(),
+                                                   self.scale)
+        
+#		vc = [i.value() for i in self.vec_player_VB_trans]
+        canvas.draw_polygon([i.value() for i in self.vec_player_VB_trans], 1, col, col)
+#        canvas.draw_polyline(self.vec_player_VB_trans, 1, col)
+        
+        #draw the head
+        canvas.draw_circle([self.position.x, self.position.y], 6*PLAYER_SCALE, 1, hair_col, hair_col)
+        
+        #draw the ID
+#        if SHOW_IDS:
+        if self.get_pitch().show_ids:
+            pass
+        
+        #draw the state
+#        if SHOW_STATES:
+        if self.get_pitch().show_states:
+            col = "rgb(0,170,0)"
+            canvas.draw_text(self.state_machine.current_state.__name__, (self.position.x, self.position.y+20), 10, col)
+
+            
+
+#TODO - make FieldPlayerStates a module and add 'cls' to all class methods
+class FieldPlayerStates:
+    
+
+    class GlobalPlayerState:
+        __name__ = "GlobalPlayerState"
+        
+        def enter(player): pass
+        
+        def exit(player): pass
+    
+        def execute(player):
+            
+            
+            #if a player is in possession and close to the ball reduce his max speed
+            if player.ball_within_receiving_range() and player.isControllingPlayer():
+                player.set_max_speed(PLAYER_MAX_SPEED_WITH_BALL)
+            else:
+                player.set_max_speed(PLAYER_MAX_SPEED_WITHOUT_BALL)
+                
+        def on_message(player, telegram):
+
+            if telegram.msg == MSG_RECEIVE_BALL:
+                #set the target
+                player.steering.set_target(telegram.extra_info)
+                
+                #change state 
+                player.get_FSM().change_state(FieldPlayerStates.ReceiveBall)
+                
+                return True
+            
+            elif telegram.msg == MSG_SUPPORT_ATTACKER:
+                #if already supporting just return
+                if player.get_FSM().isInState(FieldPlayerStates.SupportAttacker):
+                    return True
+                
+                #set the target to be the best supporting position
+                player.steering.set_target(player.team.get_support_spot())
+                
+                #change the state
+                player.get_FSM().change_state(FieldPlayerStates.SupportAttacker)
+                
+                return True
+            
+            elif telegram.msg == MSG_WAIT:
+                #change the state
+                player.get_FSM().change_state(FieldPlayerStates.Wait)
+                return True
+            
+            elif telegram.msg == MSG_GO_HOME:
+                player.set_default_home_region()
+                player.get_FSM().change_state(FieldPlayerStates.ReturnToHomeRegion)
+                return True
+    
+            elif telegram.msg == MSG_PASS_TO_ME:
+                #get the position of the player requesting the pass 
+                receiver = telegram.extra_info
+                
+                #if the ball is not within kicking range or their is already a 
+                #receiving player, this player cannot pass the ball to the player
+                #making the request.
+                if player.team.receiving_player != None or not player.ball_within_kicking_range():                
+                    return True
+                
+                #make the pass   
+                player.get_ball().kick(receiver.position - player.get_ball().position, MAX_PASSING_FORCE)
+                
+                #let the receiver know a pass is coming 
+                Dispatcher.dispatch_msg(Dispatcher,
+                                        SEND_MSG_IMMEDIATELY,
+                                        player.ID,
+                                        receiver.ID,
+                                        MSG_RECEIVE_BALL,
+                                        receiver.position)
+                
+                #change state   
+                player.get_FSM().change_state(FieldPlayerStates.Wait)
+                if player.team.isInControl(): # DEBUG
+                    player.find_support()
+                return True
+    
+            return False
+                              
+    
+    class ChaseBall:
+        __name__ = "ChaseBall"
+        
+        def enter(player):
+            
+            player.steering.seek_on()
+    
+        def execute(player):
+            
+            #if the ball is within kicking range the player changes state to KickBall.
+            if player.ball_within_kicking_range():
+                player.get_FSM().change_state(FieldPlayerStates.KickBall)
+                return
+                                                                                      
+            #if the player is the closest player to the ball then he should keep
+            #chasing it
+            if player.isClosestTeamMemberToBall():
+                player.steering.set_target(player.get_ball().position)
+                return
+            
+            #if the player is not closest to the ball anymore, he should return back
+            #to his home region and wait for another opportunity
+            player.get_FSM().change_state(FieldPlayerStates.ReturnToHomeRegion)
+    
+        def exit(player):
+            
+            player.steering.seek_off()
+    
+        def on_message(player, telegram):
+            return False
+        
+        
+    class Dribble:
+        __name__ = "Dribble"
+    
+        def exit(player):
+            
+            pass
+    
+        def on_message(player, msg): return False
+    
+        def enter(player):
+            
+            #let the team know this player is controlling
+            player.team.set_controlling_player(player)
+    
+        def execute(player):
+            
+            dot = player.team.home_goal.facing.dot(player.heading)
+            
+            #if the ball is between the player and the home goal, it needs to swivel
+            #the ball around by doing multiple small kicks and turns until the player 
+            #is facing in the correct direction
+            if dot < 0:
+                #the player's heading is going to be rotated by a small amount (Pi/4) 
+                #and then the ball will be kicked in that direction
+                direction = player.heading
+                
+                #calculate the sign (+/-) of the angle between the player heading and the 
+                #facing direction of the goal so that the player rotates around in the 
+                #correct direction
+#                angle = math.pi/4.0 * -1 * player.team.home_goal.facing.sign(player.heading)	#QuarterPi
+                angle = math.pi/4.0 * -1 * player.team.home_goal.facing.sign(player.heading)
+                rotate_around_origin_Vec2D(direction, angle)
+                
+                #this value works well whjen the player is attempting to control the
+                #ball and turn at the same time
+                kicking_force = CONTROL_BALL_DRIBBLE_FORCE
+                
+                player.get_ball().kick(direction, kicking_force)
+            
+            #kick the ball down the field
+            else:
+                player.get_ball().kick(player.team.home_goal.facing, MAX_DRIBBLE_FORCE)
+            
+            #the player has kicked the ball so he must now change state to follow it
+            player.get_FSM().change_state(FieldPlayerStates.ChaseBall)
+            
+            return
+    
+        
+    class ReturnToHomeRegion:
+        __name__ = "ReturnToHomeRegion"
+    
+        def enter(player):
+            
+            player.steering.arrive_on()
+            
+            if not player.get_home_region().inside(player.steering.target, Region.halfsize):
+                player.steering.set_target(player.get_home_region().get_center())
+
+        def execute(player):
+            
+
+            if player.get_pitch().game_on:
+                #if the ball is nearer this player than any other team member  and
+                #there is not an assigned receiver and the goalkeeper does not have
+                #the ball, go chase it
+                if player.isClosestTeamMemberToBall() and \
+                        player.team.receiving_player == None and \
+                        not player.get_pitch().goal_keeper_has_ball:
+  
+                    player.get_FSM().change_state(FieldPlayerStates.ChaseBall)
+                    return
+            
+            #if game is on and close enough to home, change state to wait and set the 
+            #player target to his current position.(so that if he gets jostled out of 
+            #position he can move back to it)
+            if player.get_pitch().game_on and player.get_home_region().inside(player.position, Region.halfsize):
+                player.steering.set_target(player.position)
+                player.get_FSM().change_state(FieldPlayerStates.Wait)
+                
+            #if game is not on the player must return much closer to the center of his
+            #home region
+            elif not player.get_pitch().game_on and player.at_target:
+                player.get_FSM().change_state(FieldPlayerStates.Wait)
+
+        def exit(player):
+            
+            player.steering.arrive_off()
+    
+        def on_message(player, msg):
+            return False
+    
+    
+    class Wait:
+        __name__ = "Wait"
+    
+        def enter(player):
+            
+            #if the game is not on make sure the target is the center of the player's
+            #home region. This is ensure all the players are in the correct positions
+            #ready for kick off
+            if not player.get_pitch().game_on:
+                player.steering.set_target(player.get_home_region().get_center())
+
+        def execute(player):
+            
+            #if the player has been jostled out of position, get back in position  
+            if not player.at_target():
+                player.steering.arrive_on()
+                return
+            else:
+
+                player.steering.arrive_off()
+                player.set_velocity(Vec2D())
+                #the player should keep his eyes on the ball!
+                player.track_ball()
+
+            #if this player's team is controlling AND this player is not the attacker
+            #AND is further up the field than the attacker he should request a pass.
+            if player.team.isInControl() and \
+                    not player.isControllingPlayer() and \
+                    player.isAheadOfAttacker():
+    
+                player.team.request_pass(player)    
+                return
+    
+            if player.get_pitch().game_on:
+                #if the ball is nearer this player than any other team member  AND
+                #there is not an assigned receiver AND neither goalkeeper has
+                #the ball, go chase it
+                if player.isClosestTeamMemberToBall() and \
+                        not player.get_pitch().goal_keeper_has_ball:        # DEBUG - wait w/ball bug
+#                    print player.ID, "is closest and in Wait"	# DEBUG
+                    player.get_FSM().change_state(FieldPlayerStates.ChaseBall)
+                    return
+    
+        def exit(player):
+            
+            pass
+    
+        def on_message(player, msg):
+            return False
+    
+    
+    class KickBall:
+        __name__ = "KickBall"
+    
+        def enter(player):
+            
+            #let the team know this player is controlling
+            player.team.set_controlling_player(player)
+            
+            #the player can only make so many kick attempts per second.
+            if not player.isReadyForNextKick(): 
+                player.get_FSM().change_state(FieldPlayerStates.ChaseBall)
+    
+        def execute(player):
+             
+            #calculate the dot product of the vector pointing to the ball
+            #and the player's heading
+            to_ball = player.get_ball().position - player.position
+            dot = player.heading.dot(normalize_Vec2D(to_ball))
+            
+            #cannot kick the ball if the goalkeeper is in possession or if it is 
+            #behind the player or if there is already an assigned receiver. So just
+            #continue chasing the ball
+            if player.team.receiving_player != None or \
+                    player.get_pitch().goal_keeper_has_ball or \
+                    dot < 0:
+                player.get_FSM().change_state(FieldPlayerStates.ChaseBall)
+                return
+            
+            
+            #if a shot is possible, this vector will hold the position along the 
+            #opponent's goal line the player should aim for.
+            ball_target = player.team.opponents_goal.center
+            
+            #the dot product is used to adjust the shooting force. The more
+            #directly the ball is ahead, the more forceful the kick
+            power = MAX_SHOOTING_FORCE * dot
+
+            #if it is determined that the player could score a goal from this position
+            #OR if he should just kick the ball anyway, the player will attempt
+            #to make the shot
+            if player.team.can_shoot(player.get_ball().position, power, ball_target) or \
+                    (random.random() < CHANCE_PLAYER_ATTEMPTS_POT_SHOT):
+                
+                #add some noise to the kick. We don't want players who are 
+                #too accurate! The amount of noise can be adjusted by altering
+                #Player Kicking Accuracy
+                ball_target = add_noise_to_kick(player.get_ball().position, ball_target)
+                
+                #this is the direction the ball will be kicked in
+                kick_direction = ball_target - player.get_ball().position
+                
+                player.get_ball().kick(kick_direction, power)
+                
+                #change state   
+                player.get_FSM().change_state(FieldPlayerStates.Wait)
+                
+                if player.isControllingPlayer(): player.find_support()
+                
+                return
+            
+            
+            #if a receiver is found this will point to it
+            receiver = None
+            
+            power = MAX_PASSING_FORCE * dot
+            
+            #test if there are any potential candidates available to receive a pass
+            did_find, rcvr, pass_targ = player.team.find_pass(player,
+                                          receiver,
+                                          ball_target,
+                                          power,
+                                          MIN_PASS_DIST)
+         
+            if player.isThreatened() and did_find:
+            
+                #add some noise to the kick
+#                ball_target = add_noise_to_kick(player.get_ball().position, ball_target)
+                pass_targ = add_noise_to_kick(player.get_ball().position, pass_targ)
+                
+#                kick_direction = ball_target - player.get_ball().position
+                kick_direction = pass_targ - player.get_ball().position
+                
+                player.get_ball().kick(kick_direction, power)
+                
+                #let the receiver know a pass is coming
+#                print player.ID, "sending pass msg to", rcvr.ID, "at", str(pass_targ)
+                Dispatcher.dispatch_msg(Dispatcher,
+                                        SEND_MSG_IMMEDIATELY,
+                                        player.ID,
+                                        rcvr.ID,
+                                        MSG_RECEIVE_BALL,
+                                        pass_targ)                           
+                
+                #the player should wait at his current position unless instructed
+                #otherwise  
+                player.get_FSM().change_state(FieldPlayerStates.Wait)
+                player.find_support()
+                
+                return
+            
+            #cannot shoot or pass, so dribble the ball upfield
+            else:
+                if not player.isControllingPlayer(): return		# DEBUG
+                player.find_support()
+                player.get_FSM().change_state(FieldPlayerStates.Dribble)
+    
+        def exit(player): pass
+              
+        def on_message(player, msg):
+            return False
+    
+    
+    class ReceiveBall:
+        __name__ = "ReceiveBall"
+    
+        def enter(player):
+            
+    
+            #let the team know this player is receiving the ball
+            player.team.set_receiver(player)
+            
+            #this player is also now the controlling player
+            player.team.set_controlling_player(player)
+            
+            #there are two types of receive behavior. One uses arrive to direct
+            #the receiver to the position sent by the passer in its telegram. The
+            #other uses the pursuit behavior to pursue the ball. 
+            #This statement selects between them dependent on the probability
+            #ChanceOfUsingArriveTypeReceiveBehavior, whether or not an opposing
+            #player is close to the receiving player, and whether or not the receiving
+            #player is in the opponents 'hot region' (the third of the pitch closest
+            #to the opponent's goal
+            pass_threat_radius = 70.0
+            
+            if player.in_hot_region() or \
+                    random.random() < CHANCE_OF_USING_ARRIVE_TYPE_RECEIVE_BEHAVIOR and \
+                    not player.team.isOpponentWithinRadius(player.position, pass_threat_radius):
+    
+                player.steering.arrive_on()
+            else:
+                player.steering.pursuit_on()
+    
+        def execute(player):
+            
+            #if the ball comes close enough to the player or if his team loses control
+            #he should change state to chase the ball
+            if player.ball_within_receiving_range() or not player.team.isInControl():
+                player.get_FSM().change_state(FieldPlayerStates.ChaseBall)
+                return
+            
+            if player.steering.pursuit_is_on():
+                player.steering.set_target(player.get_ball().position)
+            
+            #if the player has 'arrived' at the steering target he should wait and
+            #turn to face the ball
+            if player.at_target():
+                player.steering.arrive_off()
+                player.steering.pursuit_off()
+                player.track_ball()
+                player.set_velocity(Vec2D())
+    
+        def exit(player):
+            player.steering.arrive_off()
+            player.steering.pursuit_off()
+            player.team.set_receiver(None)
+    
+        def on_message(player, msg):
+            return False
+    
+    
+    class SupportAttacker:
+        __name__ = "SupportAttacker"
+    
+        def enter(player):
+            
+            player.steering.arrive_on()
+            
+            player.steering.set_target(player.team.get_support_spot())
+    
+        def execute(player):
+            #if his team loses control go back home
+            if not player.team.isInControl():
+                player.get_FSM().change_state(FieldPlayerStates.ReturnToHomeRegion) 
+                return
+            
+            #if the best supporting spot changes, change the steering target
+            if player.team.get_support_spot() != player.steering.target:
+                player.steering.set_target(player.team.get_support_spot())
+                player.steering.arrive_on()
+            
+            #if this player has a shot at the goal AND the attacker can pass
+            #the ball to him the attacker should pass the ball to this player
+            if player.team.can_shoot(player.position, MAX_SHOOTING_FORCE):
+                player.team.request_pass(player)
+            
+            #if this player is located at the support spot and his team still have
+            #possession, he should remain still and turn to face the ball
+            if player.at_target():
+                player.steering.arrive_off()
+                
+                #the player should keep his eyes on the ball!
+                player.track_ball()
+                
+                player.set_velocity(Vec2D())
+                
+                #if not threatened by another player request a pass
+                if not player.isThreatened():
+                    player.team.request_pass(player)
+    
+        def exit(player):
+            #set supporting player to null so that the team knows it has to 
+            #determine a new one.
+            player.team.set_supporting_player(None)
+            player.steering.arrive_off()
+    
+        def on_message(player, msg):
+            return False
+
+
+class FieldPlayer(PlayerBase):
+    
+    def __init__(self,
+                 home_team,
+                 home_region,
+                 start_state,
+                 heading,
+                 velocity,
+                 mass,
+                 max_force,
+                 max_speed,
+                 max_turn_rate,
+                 scale,
+                 role):
+        
+        
+        PlayerBase.__init__(self,
+                            home_team,
+                            home_region,
+                            heading,
+                            velocity,
+                            mass,
+                            max_force,
+                            max_speed,
+                            max_turn_rate,
+                            scale,
+                            role)                                    
+        # pass to me flag
+        self.pass_to_me = False
+        
+        #set up the state machine
+        self.state_machine = StateMachine(self)
+        
+        if start_state:
+            self.state_machine.set_current_state(start_state)
+            self.state_machine.set_previous_state(start_state)
+            self.state_machine.set_global_state(FieldPlayerStates.GlobalPlayerState)
+            
+#            self.state_machine.current_state().enter(self)
+            self.state_machine.current_state.enter(self)
+        
+        self.steering.separation_on()
+        
+        #set up the kick regulator
+        self.kick_limiter = Regulator(PLAYER_KICK_FREQUENCY) # DEBUG
+
+    def get_FSM(self):
+        return self.state_machine
+
+    def isReadyForNextKick(self):
+        return True		#self.kick_limiter.isReady()		# DEBUG
+
+    def update(self):
+        #run the logic for the current state
+        self.state_machine.update()
+        #calculate the combined steering force
+        self.steering.calculate()
+        
+        #if no steering force is produced decelerate the player by applying a
+        #braking force
+        if self.steering.force().isZero():
+            braking_rate = 0.8 
+            self.velocity = self.velocity * braking_rate                                     
+        
+        #the steering force's side component is a force that rotates the 
+        #player about its axis. We must limit the rotation so that a player
+        #can only turn by PlayerMaxTurnRate rads per update.
+        turning_force = self.steering.side_component()
+        
+        clamp(turning_force, -PLAYER_MAX_TURN_RATE, PLAYER_MAX_TURN_RATE)
+        
+        #rotate the heading vector
+        rotate_around_origin_Vec2D(self.heading, turning_force)
+
+        #make sure the velocity vector points in the same direction as
+        #the heading vector
+        self.velocity = self.heading * self.velocity.length()
+        
+        #and recreate v_side
+        self.v_side = self.heading.perp()
+        
+        #now to calculate the acceleration due to the force exerted by
+        #the forward component of the steering force in the direction
+        #of the player's heading
+        accel = self.heading * self.steering.forward_component() / self.mass
+        
+        self.velocity += accel
+
+        #make sure player does not exceed maximum velocity
+        self.velocity.truncate(self.max_speed)
+        
+        #update the position
+        self.position += self.velocity
+        
+        #enforce a non-penetration constraint if desired
+        if NON_PENETRATION_CONSTRAINT:
+            enforce_non_penetration_constraint(self, self.team.players+self.team.opponents.players)	#AutoList<PlayerBase>::GetAllMembers()
+
+    def handle_message(self, msg):
+        
+        return self.state_machine.handle_message(msg)
+
+    def draw(self, canvas):
+        
+        #set appropriate team color
+        if self.team.color == SoccerTeam.blue:
+            col = "Blue"
+            hair_col = "Brown"
+        else:
+            col = "Red"
+            hair_col = "Maroon"
+            
+        #render the player's body
+        self.vec_player_VB_trans = world_transform(self.vec_player_VB,
+                                                   self.position,
+                                                   self.heading,
+                                                   self.v_side,
+                                                   self.scale)
+        
+        canvas.draw_polygon([i.value() for i in self.vec_player_VB_trans], 1, col, col)
+        
+        #and 'is 'ead
+        if SHOW_HIGHLIGHT_IF_THREATENED and self.team.controlling_player == self and self.isThreatened():
+            hair_col = "Yellow"
+    
+        canvas.draw_circle(self.position.value(), 6*PLAYER_SCALE, 1, hair_col, hair_col)
+        if self.pass_to_me and self.team.isInControl(): 
+            canvas.draw_text("!", (self.position.x-5, self.position.y-1), 14, "Yellow")
+            if self.team.controlling_player is self: self.pass_to_me = False
+        else:
+            self.pass_to_me = False
+
+    
+        #render the state
+#        if SHOW_STATES:
+        if self.get_pitch().show_states:
+            col = "rgb(0,170,0)"
+            canvas.draw_text(self.state_machine.current_state.__name__, (self.position.x, self.position.y-20), 10, col)     
+        
+        #show IDs
+#        if SHOW_IDS:
+        if self.get_pitch().show_ids:
+            col = "rgb(0,170,0)"
+            canvas.draw_text(str(self.ID), (self.position.x-15, self.position.y-15),14, col)
+        
+        if SHOW_TARGETS:
+            canvas.draw_circle(self.steering.target(), 3, 1, "Red")
+            canvas.draw_text(str(self.ID), self.steering.target.value(), 12, "Red")
+
+
+# TODO - make TeamStates a module and add 'cls' to all class methods
+class TeamStates:
+
+    def change_player_home_regions(team, new_regions):
+        
+        for plyr in enumerate(new_regions):
+            team.set_player_home_region(plyr[0], new_regions[plyr[0]])
+
+        
+    class Attacking:
+        __name__ = "Attacking"
+    
+        def enter(team):
+            
+            #these define the home regions for this state of each of the players
+            blue_regions = [1,12,14,6,4]
+            red_regions = [16,3,5,9,13]
+            
+            #set up the player's home regions
+            if team.color == SoccerTeam.blue:
+                TeamStates.change_player_home_regions(team, blue_regions)
+            else:
+                TeamStates.change_player_home_regions(team, red_regions)
+            
+            #if a player is in either the Wait or ReturnToHomeRegion states, its
+            #steering target must be updated to that of its new home region to enable
+            #it to move into the correct position.
+            team.update_targets_of_waiting_players()
+    
+        def execute(team):
+            
+            #if this team is no longer in control change states
+            if not team.isInControl():
+                team.get_FSM().change_state(TeamStates.Defending)
+                return
+            
+            #calculate the best position for any supporting attacker to move to
+            team.determine_best_supporting_position()
+    
+        def exit(team):
+            
+            #there is no supporting player for defense
+            team.set_supporting_player(None)
+    
+        def on_message(team, msg):
+            return False
+    
+        
+    class Defending:
+        __name__ = "Defending"
+    
+        def enter(team):
+            
+            #these define the home regions for this state of each of the players
+            blue_regions = [1,6,8,3,5]
+            red_regions = [16,9,11,12,14]
+            
+            #set up the player's home regions
+            if team.color == SoccerTeam.blue:
+                TeamStates.change_player_home_regions(team, blue_regions)
+            else:
+                TeamStates.change_player_home_regions(team, red_regions)
+            
+            #if a player is in either the Wait or ReturnToHomeRegion states, its
+            #steering target must be updated to that of its new home region
+            team.update_targets_of_waiting_players()
+    
+        def execute(team):
+            
+            #if in control change states
+            if team.isInControl():
+                team.get_FSM().change_state(TeamStates.Attacking)
+                return
+    
+        def exit(team): pass
+        
+        def on_message(team, msg): return False
+    
+        
+    class PrepareForKickOff:
+        __name__ = "PrepareForKickOff"
+    
+        def enter(team):
+            
+            #reset key player pointers
+            team.set_controlling_player(None)
+            team.set_supporting_player(None)
+            team.set_receiver(None)
+            team.set_player_closest_to_ball(None)
+            
+            #send Msg_GoHome to each player.
+            team.return_all_field_players_to_home()
+    
+        def execute(team):
+            
+            #if both teams in position, start the game
+            if team.all_players_at_home() and team.opponents.all_players_at_home():
+                team.get_FSM().change_state(TeamStates.Defending)
+    
+        def exit(team):
+            
+            team.pitch.game_on = True
+    
+        def on_message(team, msg): return False
+
+
+class TeamColor:
+    
+    blue = 0
+    red = 1
+    
+    
+class SoccerTeam(TeamColor):
+    
+    def __init__(self,
+                 home_goal,
+                 opponents_goal,
+                 pitch,
+                 color):
+        
+    
+        self.opponents_goal = opponents_goal
+        self.home_goal = home_goal
+        self.opponents = None
+        self.pitch = pitch
+        self.color = color
+        self.players = []
+        self.dist_sq_to_ball_of_closest_player = 0.0
+        self.supporting_player = None
+        self.receiving_player = None
+        self.controlling_player = None
+        self.player_closest_to_ball = None
+
+        #setup the state machine
+        self.state_machine = StateMachine(self)
+        
+        self.state_machine.set_current_state(TeamStates.Defending)
+        self.state_machine.set_previous_state(TeamStates.Defending)
+        self.state_machine.set_global_state(None)
+        
+        #create the players and goalkeeper
+        self.create_players()
+        
+        #set default steering behaviors
+        for it in self.players:
+            it.steering.separation_on()
+        
+        #create the sweet spot calculator
+        self.support_spot_calc = SupportSpotCalculator(NUM_SWEET_SPOTS_X, 
+                                                       NUM_SWEET_SPOTS_Y,
+                                                       self)  
+
+    def members(self):
+        return self.players
+
+    def get_FSM(self):
+        return self.state_machine
+  
+    def set_opponents(self, opps):
+        
+        self.opponents = opps
+
+    def set_player_closest_to_ball(self, plyr):
+        
+        self.player_closest_to_ball = plyr
+        
+    def closest_dist_to_ball_sq(self):
+        return self.dist_sq_to_ball_of_closest_player
+
+    def get_support_spot(self):
+        
+        return self.support_spot_calc.get_best_supporting_spot()
+
+    def set_supporting_player(self, plyr):
+        
+        self.supporting_player = plyr
+    
+    def set_receiver(self, plyr):
+        
+        self.receiving_player = plyr
+
+    def set_controlling_player(self, plyr):
+        
+        self.controlling_player = plyr
+        
+        #rub it in the opponents faces!
+        self.opponents.lost_control()
+
+    def isInControl(self):
+        if self.controlling_player:
+            return True
+        else:
+            return False
+    
+    def lost_control(self):
+        self.controlling_player = None
+  
+    def determine_best_supporting_position(self):
+        self.support_spot_calc.determine_best_supporting_position()
+   
+    def _name(self):
+        if self.color == TeamColor.blue:
+            return "Blue"
+        return "Red"
+        
+    def update(self):
+
+        self.calculate_closest_player_to_ball()
+
+        self.state_machine.update()
+
+        #now update each player
+        for plyr in self.players:
+            plyr.update()
+
+    def calculate_closest_player_to_ball(self):
+        
+        closest_so_far = float('inf')
+
+        for plyr in self.players:
+            #calculate the dist. Use the squared value to avoid sqrt
+            dist = distance_sq_Vec2D(plyr.position, self.pitch.ball.position)
+            
+            #keep a record of this value for each player
+            plyr.set_dist_sq_to_ball(dist)
+        
+            if dist < closest_so_far:
+                closest_so_far = dist
+                self.player_closest_to_ball = plyr
+        
+        self.dist_sq_to_ball_of_closest_player = closest_so_far
+
+    def determine_best_supporting_attacker(self):
+        
+        closest_so_far = float('inf')
+        
+        best_player = None
+        if not self.controlling_player: return 	# DEBUG
+        for plyr in self.players:
+            #only attackers utilize the BestSupportingSpot
+            if  (plyr.player_role == PlayerBase.attacker) and (plyr != self.controlling_player):
+
+                #calculate the dist. Use the squared value to avoid sqrt
+                dist = distance_sq_Vec2D(plyr.position, self.support_spot_calc.get_best_supporting_spot())
+
+                if dist < closest_so_far:
+                    closest_so_far = dist
+                    best_player = plyr
+
+        return best_player
+    
+    def find_pass(self, passer, receiver, pass_target, power, min_passing_distance):
+        
+        
+        closest_to_goal_so_far = float('inf')
+        target = Vec2D()
+        
+        for plyr in self.players: 
+            
+            if  plyr != passer and distance_sq_Vec2D(passer.position, plyr.position) > min_passing_distance*min_passing_distance:
+   
+                if self.get_best_pass_to_receiver(passer, plyr, target, power):
+                    #if the pass target is the closest to the opponent's goal line found
+                    # so far, keep a record of it
+                    dist2goal = math.fabs(target.x - self.opponents_goal.center.x)
+                    
+                    if dist2goal < closest_to_goal_so_far:
+                        closest_to_goal_so_far = dist2goal
+                        
+                        #keep a record of this player
+                        receiver = plyr
+                        
+                        #and the target
+                        pass_target = Vec2D(target)
+        
+        if receiver:
+            if pass_target.value() == [0.0,0.0]: pass_target = receiver.position
+            return True, receiver, pass_target		# DEBUG
+        else: 
+            return False, None, None
+
+    def get_best_pass_to_receiver(self, passer, receiver, pass_target, power):
+          
+        #first, calculate how much time it will take for the ball to reach 
+        #this receiver, if the receiver was to remain motionless 
+        time = self.pitch.ball.time_to_cover_distance(self.pitch.ball.position,
+                                                      receiver.position,
+                                                      power)
+        
+        #return false if ball cannot reach the receiver after having been
+        #kicked with the given power
+        if time < 0:
+            return False
+        
+        #the maximum distance the receiver can cover in this time
+        intercept_range = time * receiver.max_speed
+        
+        #Scale the intercept range
+        scaling_factor = 0.3
+        intercept_range *= scaling_factor
+        
+        #now calculate the pass targets which are positioned at the intercepts
+        #of the tangents from the ball to the receiver's range circle.
+        ip1 = Vec2D()
+        ip2 = Vec2D()
+        
+        get_tangent_points(receiver.position,
+                                intercept_range,
+                                self.pitch.ball.position,
+                                ip1,
+                                ip2)
+        
+#        num_passes_to_try = 3
+        passes = [ip1, receiver.position, ip2]
+        
+        closest_so_far = float('inf')
+        result = False
+        
+        for _pass in passes:
+            dist = math.fabs(_pass.x - self.opponents_goal.center.x)
+            
+            if dist < closest_so_far and \
+                self.pitch.playing_area.inside(_pass) and \
+                self.isPassSafeFromAllOpponents(self.pitch.ball.position,
+                                       _pass,
+                                       receiver,
+                                       power):
+            
+                closest_so_far = dist
+                pass_target   = _pass
+                result      = True
+        
+        return result
+
+    def isPassSafeFromOpponent(self, _from, target, receiver, opp, passing_force):
+        
+        #move the opponent into local space.
+        to_target = target - _from
+        to_target_normalized = normalize_Vec2D(to_target)
+        
+        local_pos_opp = point_to_local_space(opp.position,
+                                          to_target_normalized,
+                                          to_target_normalized.perp(),
+                                          _from)
+        
+        if local_pos_opp.x < 0:
+            return True
+        
+        #if the opponent is further away than the target we need to consider if
+        #the opponent can reach the position before the receiver.
+        if distance_sq_Vec2D(_from, target) < distance_sq_Vec2D(opp.position, _from):
+            if receiver:
+                if distance_sq_Vec2D(target, opp.position)  > distance_sq_Vec2D(target, receiver.position):
+                    return True
+                else:
+                    return False
+            else:
+                return True
+        
+        #calculate how long it takes the ball to cover the distance to the 
+        #position orthogonal to the opponents position
+        time_for_ball = self.pitch.ball.time_to_cover_distance(Vec2D(),
+                                                               Vec2D(local_pos_opp.x, 0),
+                                                               passing_force)
+        
+        #now calculate how far the opponent can run in this time
+        reach = opp.max_speed * time_for_ball + self.pitch.ball.bound_radius + opp.bound_radius
+        
+        if math.fabs(local_pos_opp.y) < reach:
+            return False
+
+        return True
+
+    def isPassSafeFromAllOpponents(self, 
+                                   _from, 
+                                   target, 
+                                   receiver, 
+                                   passing_force):
+        
+
+        for opp in self.opponents.players:
+            if not self.isPassSafeFromOpponent(_from, target, receiver, opp, passing_force):
+                return False
+        
+        return True
+
+    def can_shoot(self, ball_pos, power, shot_target=Vec2D()):
+        
+
+        #the number of randomly created shot targets this method will test 
+        num_attempts = NUM_ATTEMPTS_TO_FIND_VALID_STRIKE
+        
+        while num_attempts:
+            #choose a random position along the opponent's goal mouth. (making
+            #sure the ball's radius is taken into account)
+            shot_target = self.opponents_goal.center
+            
+            #the y value of the shot position should lay somewhere between two
+            #goalposts (taking into consideration the ball diameter)
+            min_y_val = int(self.opponents_goal.left_post.y + self.pitch.ball.bound_radius)
+            max_y_val = int(self.opponents_goal.right_post.y - self.pitch.ball.bound_radius)
+            
+            shot_target.y = float(random.randint(min_y_val, max_y_val))
+            
+            #make sure striking the ball with the given power is enough to drive
+            #the ball over the goal line.
+            time = self.pitch.ball.time_to_cover_distance(ball_pos,
+                                                          shot_target,
+                                                          power)
+            
+            #if it is, this shot is then tested to see if any of the opponents
+            #can intercept it.
+            if time >= 0:
+                if self.isPassSafeFromAllOpponents(ball_pos, shot_target, None, power):
+                    return True
+
+            num_attempts -= 1
+        
+        return False
+
+    def return_all_field_players_to_home(self):
+        
+        for plyr in self.players:
+            if plyr.player_role != PlayerBase.goal_keeper:
+                Dispatcher.dispatch_msg(Dispatcher,
+                                        SEND_MSG_IMMEDIATELY,
+                                        1,
+                                        plyr.ID,
+                                        MSG_GO_HOME,
+                                        None)
+
+    def draw(self, canvas):
+        
+        for p in self.players:
+            p.draw(canvas)
+        
+        #show the controlling team and player at the top of the display
+        if SHOW_CONTROLLING_TEAM:
+            
+            if self.color == TeamColor.blue and self.isInControl():
+                canvas.draw_text("Blue in Control", (20,14), 12, "White")
+
+            elif self.color == TeamColor.red and self.isInControl():
+                canvas.draw_text("Red in Control", (20,14), 12, "White")
+
+            if self.controlling_player:
+                canvas.draw_text("Controlling Player: "+str(self.controlling_player.ID), (self.pitch.cx_client-150,14), 12, "White")
+
+        #render the sweet spots
+        if SHOW_SUPPORT_SPOTS and self.isInControl():
+            self.support_spot_calc.draw(canvas)
+        
+        if self.color == TeamColor.red:
+            
+            if self.state_machine.current_state == TeamStates.Attacking:
+                canvas.draw_text("Red: Attacking", (160, 14), 12, "White")
+
+            if self.state_machine.current_state == TeamStates.Defending:
+                canvas.draw_text("Red: Defending", (160, 14), 12, "White")
+
+            if self.state_machine.current_state == TeamStates.PrepareForKickOff:
+                canvas.draw_text("Red: Kickoff", (160, 14), 12, "White")
+
+        else:
+            if self.state_machine.current_state == TeamStates.Attacking:
+                canvas.draw_text("Blue: Attacking", (160, self.pitch.cy_client-6), 12, "White")
+
+            if self.state_machine.current_state == TeamStates.Defending:
+                canvas.draw_text("Blue: Defending", (160, self.pitch.cy_client-6), 12, "White")
+
+            if self.state_machine.current_state == TeamStates.PrepareForKickOff:
+                canvas.draw_text("Blue: Kickoff", (160, self.pitch.cy_client-6), 12, "White")
+
+        if self.supporting_player:
+            canvas.draw_circle((self.supporting_player.steering.target.value()), 4, 1, "Blue", "Red")
+
+    def create_players(self):
+        
+        if self.color == TeamColor.blue:
+            #goalkeeper
+            self.players.append(GoalKeeper(self,
+                                           1,
+                                           GoalKeeperStates.TendGoal,
+                                           Vec2D(0,1),
+                                           Vec2D(),
+                                           PLAYER_MASS,
+                                           PLAYER_MAX_FORCE,
+                                           PLAYER_MAX_SPEED_WITHOUT_BALL,
+                                           PLAYER_MAX_TURN_RATE,
+                                           PLAYER_SCALE))
+            
+            #create the players
+            self.players.append(FieldPlayer(self,
+                                            6,
+                                            FieldPlayerStates.Wait,
+                                            Vec2D(0,1),
+                                            Vec2D(),
+                                            PLAYER_MASS,
+                                            PLAYER_MAX_FORCE,
+                                            PLAYER_MAX_SPEED_WITHOUT_BALL,
+                                            PLAYER_MAX_TURN_RATE,
+                                            PLAYER_SCALE,
+                                            PlayerBase.attacker))
+            
+            self.players.append(FieldPlayer(self,
+                                            8,
+                                            FieldPlayerStates.Wait,
+                                            Vec2D(0,1),
+                                            Vec2D(),
+                                            PLAYER_MASS,
+                                            PLAYER_MAX_FORCE,
+                                            PLAYER_MAX_SPEED_WITHOUT_BALL,
+                                            PLAYER_MAX_TURN_RATE,
+                                            PLAYER_SCALE,
+                                            PlayerBase.attacker))
+            
+            self.players.append(FieldPlayer(self,
+                                            3,
+                                            FieldPlayerStates.Wait,
+                                            Vec2D(0,1),
+                                            Vec2D(),
+                                            PLAYER_MASS,
+                                            PLAYER_MAX_FORCE,
+                                            PLAYER_MAX_SPEED_WITHOUT_BALL,
+                                            PLAYER_MAX_TURN_RATE,
+                                            PLAYER_SCALE,
+                                            PlayerBase.defender))
+            
+            self.players.append(FieldPlayer(self,
+                                            5,
+                                            FieldPlayerStates.Wait,
+                                            Vec2D(0,1),
+                                            Vec2D(),
+                                            PLAYER_MASS,
+                                            PLAYER_MAX_FORCE,
+                                            PLAYER_MAX_SPEED_WITHOUT_BALL,
+                                            PLAYER_MAX_TURN_RATE,
+                                            PLAYER_SCALE,
+                                            PlayerBase.defender))
+        else:
+            #goalkeeper
+            self.players.append(GoalKeeper(self,
+                                           16,
+                                           GoalKeeperStates.TendGoal,
+                                           Vec2D(0,-1),
+                                           Vec2D(0.0, 0.0),
+                                           PLAYER_MASS,
+                                           PLAYER_MAX_FORCE,
+                                           PLAYER_MAX_SPEED_WITHOUT_BALL,
+                                           PLAYER_MAX_TURN_RATE,
+                                           PLAYER_SCALE))
+            
+            #create the players
+            self.players.append(FieldPlayer(self,
+                                            9,
+                                            FieldPlayerStates.Wait,
+                                            Vec2D(0,-1),
+                                            Vec2D(0.0, 0.0),
+                                            PLAYER_MASS,
+                                            PLAYER_MAX_FORCE,
+                                            PLAYER_MAX_SPEED_WITHOUT_BALL,
+                                            PLAYER_MAX_TURN_RATE,
+                                            PLAYER_SCALE,
+                                            PlayerBase.attacker))
+            
+            self.players.append(FieldPlayer(self,
+                                            11,
+                                            FieldPlayerStates.Wait,
+                                            Vec2D(0,-1),
+                                            Vec2D(0.0, 0.0),
+                                            PLAYER_MASS,
+                                            PLAYER_MAX_FORCE,
+                                            PLAYER_MAX_SPEED_WITHOUT_BALL,
+                                            PLAYER_MAX_TURN_RATE,
+                                            PLAYER_SCALE,
+                                            PlayerBase.attacker))
+            
+            self.players.append(FieldPlayer(self,
+                                            12,
+                                            FieldPlayerStates.Wait,
+                                            Vec2D(0,-1),
+                                            Vec2D(0.0, 0.0),
+                                            PLAYER_MASS,
+                                            PLAYER_MAX_FORCE,
+                                            PLAYER_MAX_SPEED_WITHOUT_BALL,
+                                            PLAYER_MAX_TURN_RATE,
+                                            PLAYER_SCALE,
+                                            PlayerBase.defender))
+            
+            self.players.append(FieldPlayer(self,
+                                            14,
+                                            FieldPlayerStates.Wait,
+                                            Vec2D(0,-1),
+                                            Vec2D(0.0, 0.0),
+                                            PLAYER_MASS,
+                                            PLAYER_MAX_FORCE,
+                                            PLAYER_MAX_SPEED_WITHOUT_BALL,
+                                            PLAYER_MAX_TURN_RATE,
+                                            PLAYER_SCALE,
+                                            PlayerBase.defender))
+        
+        #register the players with the entity manager
+        for plyr in self.players:
+            EntityMgr.register_entity(EntityManager, plyr)
+
+    def get_player_from_ID(self, _id):
+                
+        for plyr in self.players:
+            if plyr.ID == _id:
+                return plyr
+        
+        return None
+
+    def set_player_home_region(self, plyr, region):
+        
+        assert plyr > -1 and plyr < len(self.players)
+        self.players[plyr].set_home_region(region)
+
+    def update_targets_of_waiting_players(self):
+        for p in self.players:
+            if p.player_role != PlayerBase.goal_keeper:
+                if p.get_FSM().isInState(FieldPlayerStates.Wait) or p.get_FSM().isInState(FieldPlayerStates.ReturnToHomeRegion):
+                    p.steering.set_target(p.get_home_region().get_center())
+
+    def all_players_at_home(self):
+        
+        for plyr in self.players:
+            if plyr.in_home_region() == False:
+                return False
+        
+        return True
+
+    def request_pass(self, requester):
+        
+        #maybe put a restriction here
+        if random.random() > 0.1:
+            return
+        
+        requester.pass_to_me = False
+        if self.isPassSafeFromAllOpponents(self.controlling_player.position,
+                                           requester.position,
+                                           requester,
+                                           MAX_PASSING_FORCE):
+        
+            #tell the player to make the pass
+            #let the receiver know a pass is coming 
+            requester.pass_to_me = True# DEBUG
+            Dispatcher.dispatch_msg(Dispatcher,
+                                    SEND_MSG_IMMEDIATELY,
+                                    requester.ID,
+                                    self.controlling_player.ID,
+                                    MSG_PASS_TO_ME,
+                                    requester)
+        
+    def isOpponentWithinRadius(self, pos, rad):
+        
+        for opp in self.opponents.members:
+            if distance_sq_Vec2D(pos, opp.position) < rad*rad:
+                return True
+        
+        return False
+
+        
+NUM_REGIONS_HORIZONTAL = 6
+NUM_REGIONS_VERTICAL = 3
+
+class SoccerPitch:
+    
+    
+    def __init__(self, cx, cy):
+        
+        self.cx_client = cx
+        self.cy_client = cy
+        self.paused = False
+        self.goal_keeper_has_ball = False
+        self.regions = []
+        self.game_on = True
+        self.vec_walls = []
+        
+        self.show_regions = SHOW_REGIONS
+        self.show_ids = SHOW_IDS
+        self.show_states = SHOW_STATES
+        
+        #define the playing area
+        self.playing_area = Region(20, 20, cx-20, cy-20)
+        
+        #create the regions  
+        self.create_regions(self.playing_area.get_width() / float(NUM_REGIONS_HORIZONTAL),
+                            self.playing_area.get_height() / float(NUM_REGIONS_VERTICAL))
+        
+        #create the goals
+        self.red_goal  = Goal(Vec2D(self.playing_area.left, (cy-GOAL_WIDTH)/2),
+                              Vec2D(self.playing_area.left, cy - (cy-GOAL_WIDTH)/2),
+                              Vec2D(1,0))
+   
+        self.blue_goal = Goal(Vec2D(self.playing_area.right, (cy-GOAL_WIDTH)/2),
+                              Vec2D(self.playing_area.right, cy - (cy-GOAL_WIDTH)/2),
+                              Vec2D(-1,0))
+
+        #create the soccer ball
+        self.ball = SoccerBall(Vec2D(float(self.cx_client)/2.0, float(self.cy_client)/2.0),
+                               BALL_SIZE,
+                               BALL_MASS,
+                               self.vec_walls)
+
+        #create the teams 
+        self.blue_team = SoccerTeam(self.blue_goal, self.red_goal, self, TeamColor.blue)
+        self.red_team  = SoccerTeam(self.red_goal, self.blue_goal, self, TeamColor.red)
+        
+        #make sure each team knows who their opponents are
+        self.red_team.set_opponents(self.blue_team)
+        self.blue_team.set_opponents(self.red_team)
+        
+        #create the walls
+        top_left = Vec2D(self.playing_area.left, self.playing_area.top)                                       
+        top_right = Vec2D(self.playing_area.right, self.playing_area.top)
+        bottom_right = Vec2D(self.playing_area.right, self.playing_area.bottom)
+        bottom_left = Vec2D(self.playing_area.left, self.playing_area.bottom)
+                                      
+        self.vec_walls.append(Wall2D(bottom_left, self.red_goal.right_post))
+        self.vec_walls.append(Wall2D(self.red_goal.left_post, top_left))
+        self.vec_walls.append(Wall2D(top_left, top_right))
+        self.vec_walls.append(Wall2D(top_right, self.blue_goal.left_post))
+        self.vec_walls.append(Wall2D(self.blue_goal.right_post, bottom_right))
+        self.vec_walls.append(Wall2D(bottom_right, bottom_left))
+
+    def toggle_pause(self):
+        self.paused = not self.paused
+
+    def set_goal_keeper_has_ball(self, tf):
+        self.goal_keeper_has_ball = tf
+        
+    def get_region_from_index(self, idx):
+        
+        assert idx >= 0 and idx < len(self.regions), "invalid region index"
+        return self.regions[idx]
+
+    def update(self):
+        
+        if self.paused: return
+
+        #update the balls
+        self.ball.update()
+
+        #update the teams
+        self.red_team.update()
+        self.blue_team.update()
+
+    def check_for_score(self):
+        if self.blue_goal.scored(self.ball) or self.red_goal.scored(self.ball):
+            self.game_on = False
+            
+            #reset the ball                                                      
+            self.ball.place_at_position(Vec2D(float(self.cx_client)/2.0, float(self.cy_client)/2.0))
+            
+            #get the teams ready for kickoff
+            self.red_team.get_FSM().change_state(TeamStates.PrepareForKickOff)
+            self.blue_team.get_FSM().change_state(TeamStates.PrepareForKickOff)
+        
+    def create_regions(self, width, height):
+        
+        #index into the vector
+        idx = (NUM_REGIONS_HORIZONTAL * NUM_REGIONS_VERTICAL)-1
+        
+        for col in range(NUM_REGIONS_HORIZONTAL):
+            for row in range(NUM_REGIONS_VERTICAL):
+                self.regions.append(Region(self.playing_area.left+col*width,
+                                           self.playing_area.top+row*height,
+                                           self.playing_area.left+(col+1)*width,
+                                           self.playing_area.top+(row+1)*height,
+                                           idx))
+                idx-=1
+        self.regions.reverse()
+        
+    def draw(self, canvas):  
+        # render grass
+        [canvas.draw_line( (i, -10), (i+60, self.cy_client+10), 50, "#005500") for i in xrange(0, self.cx_client+100, 100)]
+#        for i in xrange(0, self.cx_client+100, 100):
+#            canvas.draw_line( (i, -10), (i+60, self.cy_client+10), 50, "#005500")
+        
+        #render regions
+#        if SHOW_REGIONS:
+        if self.show_regions:
+            for r in self.regions:
+                r.draw(canvas)	#Render(true);
+
+        # draw player in control target under ball and player
+        p = None
+        if self.red_team.isInControl():
+            p = self.red_team.controlling_player
+        elif self.blue_team.isInControl():
+            p = self.blue_team.controlling_player
+        if p: canvas.draw_circle(p.position.value(), p.bound_radius, 1, "YellowGreen", "YellowGreen")                
+                
+        #render the goals
+        l = self.playing_area.left
+        t = (self.cy_client-GOAL_WIDTH)/2
+        r = self.playing_area.left+40
+        b = self.cy_client - (self.cy_client-GOAL_WIDTH)/2
+        canvas.draw_polygon([[l,t],[r,t],[r,b],[l,b]], 3, "White")#"Red")        
+
+        l = self.playing_area.right
+        # t doesn't change 
+        r = self.playing_area.right-40
+        # b doesn't change
+        canvas.draw_polygon([[l,t],[r,t],[r,b],[l,b]], 3, "White")#"Blue") 
+        
+        
+#        canvas.draw_line((self.red_goal.left_post.x+10, self.red_goal.left_post.y), (self.red_goal.right_post.x+10, self.red_goal.right_post.y), 1, "Yellow")
+#        canvas.draw_line((self.blue_goal.left_post.x-10, self.blue_goal.left_post.y), (self.blue_goal.right_post.x-10, self.blue_goal.right_post.y), 1, "Yellow")
+        
+        #render the pitch markings
+        canvas.draw_circle(self.playing_area.get_center().value(), self.playing_area.get_width() * 0.125, 3, "White")
+        canvas.draw_line([self.playing_area.get_center().x, self.playing_area.top], [self.playing_area.get_center().x, self.playing_area.bottom], 3, "White")
+        canvas.draw_circle(self.playing_area.get_center().value(), 2, 1, "White")
+
+        #the ball
+        self.ball.draw(canvas)
+        
+        #Render the teams
+        self.red_team.draw(canvas)
+        self.blue_team.draw(canvas)
+        
+        #render the walls
+        for w in self.vec_walls:
+            w.draw(canvas)
+
+        #show the score
+        canvas.draw_text(str(self.blue_goal.num_goals_scored), ((self.cx_client/2)-50, self.cy_client-2), 18, "Red", 'monospace')
+        canvas.draw_text(str(self.red_goal.num_goals_scored), ((self.cx_client/2)+40, self.cy_client-2), 18, "Blue", 'monospace')
+        
+        return True
+
+game = SoccerPitch(SCW, SCH)
+paused = False
+
+# Main draw handler
+def draw(canvas):
+    global g_time
+    
+    if not paused: 
+        game.update()    
+        g_time+=1
+    game.draw(canvas)
+
+def pause_handler():
+    global paused
+    paused = not paused
+    
+def region_handler():
+    game.show_regions = not game.show_regions
+    
+def state_handler():
+    game.show_states = not game.show_states
+    
+# CodeSkulptor initialization
+codeskulptor.set_timeout(20)
+frame = simplegui.create_frame("Simple Soccer", SCW, SCH, 100)
+frame.set_canvas_background("DarkGreen")
+frame.add_button("Pause",pause_handler, 100)
+frame.add_label("")
+frame.add_button("Togl Regions",region_handler, 100)
+frame.add_button("Togl States",state_handler, 100)
+frame.set_draw_handler(draw)
+frame.start()
