@@ -11,6 +11,7 @@ Most of the code posted here was written for use with an online tool called Code
 # full functionality.  It does NOT run in Internet Explorer.</pre>
 <hr>
 
+arc_parabolic: http://www.codeskulptor.org/#user42_asRhgv2HN03AooR_1.py <br>
 buckland_soccer: http://www.codeskulptor.org/#save2_gRbEQJq0iE.py <br>
 particle_expl_tiles: http://www.codeskulptor.org/#user42_bidCoyCF4AC1fMQ.py <br>
 perlin_noise: http://www.codeskulptor.org/#user42_uMBCU8vN7iod6QS.py <br>
