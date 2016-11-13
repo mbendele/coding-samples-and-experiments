@@ -1,0 +1,134 @@
+"""
+A little Perlin noise generator
+"""
+
+import random
+import simplegui
+import codeskulptor
+
+codeskulptor.set_timeout(50)
+
+WIDTH = 200
+HEIGHT = 200
+
+inv_canv = simplegui.create_invisible_canvas(WIDTH, HEIGHT)
+
+def interpolate(x0, x1, alpha):
+    """
+    returns a linear interpolation between two values
+    
+    """
+    return x0 * (1-alpha) + alpha * x1
+
+def gen_white_noise(width, height):
+    """  
+    create an array with random values between 0 and 1. 
+    This array must be the same size as the array of Perlin 
+    noise you need.
+    
+    """
+    return [[random.random() for w in xrange(width)] for h in xrange(height)]
+
+def gen_smooth_noise(base_noise, octave):
+    """
+    For creating the kth octave, sample the noise array at every 
+    point (i*2k, j*2k) , for all i, j, and interpolate the other points 
+    linearly. The value 2k is called the wave length of that octave, 
+    and the value 1/2k is called the frequency.
+    
+    """
+
+    width = len(base_noise[0])
+    height = len(base_noise)
+    
+    smooth_noise = [[0.0 for w in xrange(width)] for h in xrange(height)]
+    
+    sample_period = 2**octave
+    sample_frequency = 1.0 / sample_period
+    
+    for w in xrange(width):
+        # calculate the horizontal sampling indices
+        sample_i0 = (w / sample_period) * sample_period
+        sample_i1 = (sample_i0 + sample_period) % width # wrap
+        horizontal_blend = (w - sample_i0) * sample_frequency
+        
+        for h in xrange(height):
+            # calculate the vertical sampling indices
+            sample_j0 = (h / sample_period) * sample_period;
+            sample_j1 = (sample_j0 + sample_period) % height	#wrap around
+            vertical_blend = (h - sample_j0) * sample_frequency
+ 
+            # blend the top two corners
+            top = interpolate(base_noise[sample_j0][sample_i0], 
+                              base_noise[sample_j0][sample_i1], horizontal_blend)
+ 
+            # blend the bottom two corners
+            bottom = interpolate(base_noise[sample_j1][sample_i0],
+                                 base_noise[sample_j1][sample_i1], horizontal_blend)
+ 
+            # final blend
+            smooth_noise[h][w] = (interpolate(top, bottom, vertical_blend))
+ 
+    return smooth_noise
+  
+def gen_perlin_noise(base_noise, octave_count):
+    """
+    """
+    width = len(base_noise[0])
+    height = len(base_noise)
+    
+    smooth_noise = []
+    
+    persistance = 0.5
+    
+    # generate smooth noise
+    for i in xrange(octave_count):
+        smooth_noise.append(gen_smooth_noise(base_noise, i))
+        
+    perlin_noise = [[0.0 for w in xrange(width)] for h in xrange(height)]
+    amplitude = 1.0
+    total_amplitude = 0.0
+    
+    # blend noise together
+    for octave in xrange(octave_count-1, -1, -1):
+        amplitude *= persistance
+        total_amplitude += amplitude
+        
+        for w in xrange(width):
+            for h in xrange(height):
+                perlin_noise[h][w] += smooth_noise[octave][h][w] * amplitude
+                
+    # normalization
+    for w in xrange(width):
+        for h in xrange(height):
+            perlin_noise[h][w] /= total_amplitude
+            
+    return perlin_noise
+        
+    
+    
+wn = gen_white_noise(WIDTH, HEIGHT)
+
+oos = 1.2
+pn = gen_perlin_noise(wn, 3)
+
+def paint_noise(canv):
+    for h in xrange(HEIGHT):
+        for w in xrange(WIDTH):
+            col = int(256 * pn[h][w])
+            col = min(int(col * oos), 255)
+            
+            canv.draw_point((w,h), 'rgb(%s,%s,%s)'%(col,col,col))
+
+paint_noise(inv_canv)
+
+# Handler to draw on canvas
+def draw(canvas):
+    canvas.draw_image(inv_canv, (WIDTH/2., HEIGHT/2.), (WIDTH, HEIGHT), (WIDTH/2., HEIGHT/2.), (WIDTH, HEIGHT))
+
+# Create a frame and assign callbacks to event handlers
+frame = simplegui.create_frame("Perlin", WIDTH, HEIGHT)
+frame.set_draw_handler(draw)
+
+# Start the frame animation
+frame.start()
