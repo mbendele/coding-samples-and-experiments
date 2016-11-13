@@ -1,0 +1,281 @@
+"""
+A quick particle explosion tileset creator for use with Codeskulptor 
+"""
+
+import simplegui
+import math
+import random
+import codeskulptor
+
+codeskulptor.set_timeout(20)
+
+WIDTH = 400
+HEIGHT = 400
+
+def ang_to_vec(ang, mag=1):
+    return [math.cos(ang)*mag, math.sin(ang)*mag]
+
+
+class WorldObject:
+    def __init__(self, position, velocity, size):
+        self._position = position
+        self._velocity = velocity
+        self._size = size
+        
+    def position(self): return list(self._position)
+    def velocity(self): return list(self._velocity)
+    def size(self): return self._size
+      
+
+class Particle(WorldObject):
+    """
+    Particle has a position. 
+    It needs a size that can go up and down.
+    It needs an age that is tied to transparency (how much it contributes).
+    The color is always white. The alpha changes by age.
+    
+    size becomes x and y offset from center.
+    This gets applied to the bigger context, and the color is determined
+    on the fly (dist from center) and alpha is applied.
+    
+    color tied to alpha -- or to perlin noise value?
+    
+    """    
+    def __init__(self, manager, position, velocity, level=4, size=10, age=25):
+        WorldObject.__init__(self, position, velocity, size)
+        self._manager = manager # local ref to particle manager
+        self._age = age
+        self._level = level
+        self._direction = True
+        
+    def age(self): return self._age
+    
+    def spawn(self):
+        oset = random.randrange(int(self._size))
+        oset_dir = math.radians(random.randrange(360))
+        new_vel = ang_to_vec(oset_dir, oset*.18)
+        new_vel[0] += self._velocity[0]
+        new_vel[1] += self._velocity[1]
+
+        aset = set([Particle(self._manager,
+                             [self._position[0]+new_vel[0], self._position[1]+new_vel[1]], 
+                             [new_vel[0]*.1, new_vel[1]*.1],
+                             self._level - 1,
+                             random.randrange(5),#self._size + 1,
+                             random.randrange(180))])
+        self._manager.add_particles(aset)
+    
+    def update(self):
+        self._age -= 1
+        if self._age == 0:
+            return False
+        
+        if self._direction:
+            self._size = min(self._size + .09, 50)
+        else:
+            self._size = max(self._size - .09, 0)
+        if self._size == 50:
+            self._direction = False
+        self._position[0] += self._velocity[0]
+        self._position[1] += self._velocity[1]
+        
+        if self._size > 1 and self._age > 5 and self._level > 0:
+            if random.random() < .3:
+#                print "spawn"
+                self.spawn()
+                
+        return True
+
+    
+class ParticleManager:
+    def __init__(self, owner, position, frame0):
+        self._owner = owner # local ref to explosion obj
+        self._position = position
+        self._particles = set([Particle(self, position, [0.0,0.0])])
+        self._frame_count = 0
+        self._cur_frame = frame0
+        self._tmp_add = set([])
+
+    def add_particles(self, aset):
+        if len(self._tmp_add) < 10:
+            self._tmp_add.update(aset)
+        
+    def rem_particles(self, aset):
+        self._particles.difference_update(aset)
+        
+    def update(self):
+        if not self._cur_frame: return False
+#        print self._cur_frame.get_id(), self._frame_count
+        
+        dead = set([])
+        cnt = 0
+        for p in list(self._particles):
+#            print "p", cnt, len(self._particles), p.position(), p.velocity(), p.size()
+            cnt += 1
+            is_alive = p.update()
+            
+            if not is_alive:
+                dead.add(p)
+            elif self._frame_count == 0:
+#                print "writing age", p.age()
+                self._cur_frame.write_to_frame(p.position(), p.size(), p.age()/255.)
+        
+        self._particles = self._particles.union(self._tmp_add)
+        self._tmp_add = set([])
+        if len(dead) > 0: self.rem_particles(dead)
+        
+        if self._frame_count == 0:
+            self._cur_frame.update_inv_canv()
+            self._cur_frame = self._owner.get_frame_x(self._cur_frame.get_id()+1)
+            if self._cur_frame:
+                print "frm id", self._cur_frame.get_id()
+                self._frame_count = int((self._owner.duration()*1000)/self._owner.sample_length())
+                return True
+            else:
+                return False
+        else:
+            self._frame_count -= 1
+            return True
+
+    
+class ExplFrame:
+    fid = 0
+    def __init__(self, position, width, height):
+        self._id = ExplFrame.fid
+        ExplFrame.fid += 1
+        
+        self._center = (width/2., height/2.)
+        self._width_height = (width, height)
+        self._position = position
+        self._img_buf = [[0.0 for _w in range(width)] for _h in range(height)]
+        self.update_inv_canv()
+        
+    def set_position(self, pos):
+        self._position = pos
+        
+    def get_id(self):
+        return self._id
+
+    def write_to_frame(self, pos, size, age):
+#        print "writing", pos, size, age
+        x = int(pos[0] - size/2.)
+        y = int(pos[1] - size/2.)
+        color = age/20
+        for h in range(int(size)):
+            for w in range(int(size)):
+                try:
+                    self._img_buf[y+h][x+w] += color
+                except:
+                    pass
+    
+    def color(self, val):
+        return 'rgba(255,255,255,%s)'%val
+        
+    def update_inv_canv(self):
+        width = len(self._img_buf[0])
+        height = len(self._img_buf)
+        inv_canv = simplegui.create_invisible_canvas(self._width_height[0], self._width_height[1])
+        
+        for y in range(height):
+            for x in range(width):
+                if self._img_buf[y][x] > 0:
+                    inv_canv.draw_point((x,y), self.color(self._img_buf[y][x]))
+        self._inv_canv = inv_canv
+                    
+    def draw(self, canvas, pos=None):
+        if not pos: pos = self._position
+        canvas.draw_image(self._inv_canv, self._center, self._width_height, pos, [self._width_height[0]*2., self._width_height[1]*2.])
+    
+    
+class Explosion(WorldObject):
+    TILESET = 0
+    CREATE = 1
+    FLIPPING = 2
+    
+    def __init__(self, position, velocity, size, sample_length=16, duration=0.6):
+        WorldObject.__init__(self, position, velocity, size)
+        self._frames = [ExplFrame([size/2.+(frm%4)*size, size/2.+(frm/4)*size], self.size(), self.size()) 
+                        for frm in range(0, sample_length)]
+        self._particle_mngr = ParticleManager(self, position, self._frames[0])
+        self._sample_length = sample_length
+        self._duration = duration
+        self._fb_index = 0
+        self._fb_timer = None
+        self._state = Explosion.FLIPPING
+        
+    def duration(self): return self._duration
+    def sample_length(self): return self._sample_length
+    
+    def get_frame_x(self, x):
+        if x >= self._sample_length or x < 0:
+            return None
+        return self._frames[x]
+        
+    def show_flipbook(self):
+        self._state = Explosion.FLIPPING
+        
+    def show_tileset(self):
+        self._state = Explosion.TILESET
+        
+    def run_flipbook(self):
+        if self._fb_index < self._sample_length-1:
+            self._fb_index += 1
+        else:
+            self._fb_timer.stop()
+            self._fb_index = 0
+        #gapp._f.get_canvas_image()
+        
+    def start_flipbook(self):
+        if self._state != Explosion.FLIPPING:
+            return
+        self._fb_index = 0
+        if not self._fb_timer:
+            self._fb_timer = simplegui.create_timer((self._duration*1000)/self._sample_length, 
+                                                    self.run_flipbook)
+        self._fb_timer.start()
+    
+    def create_tileset(self):
+        self._state = Explosion.CREATE
+    
+    def update(self, canvas):
+        if self._state == Explosion.CREATE:
+            self._state = self._particle_mngr.update()
+        
+        if self._state == Explosion.FLIPPING:
+            wh = [WIDTH/2., HEIGHT/2.]
+            canvas.draw_polyline([[wh[0]-50,wh[1]-50],[wh[0]+50,wh[1]-50],
+                                  [wh[0]+50,wh[1]+50],[wh[0]-50,wh[1]+50],
+                                  [wh[0]-50,wh[1]-50]], 1, "Black")
+            self._frames[self._fb_index].draw(canvas, wh)
+        else:
+            for f in self._frames:
+                f.draw(canvas)
+                
+                
+class GenApp:
+    EXP_SZ = 100
+    EXP_HALF_SZ = EXP_SZ/2.
+    
+    def __init__(self, name, w, h):
+        # app owns explosion
+        self._expl = Explosion([GenApp.EXP_HALF_SZ, GenApp.EXP_HALF_SZ], [0,0], GenApp.EXP_SZ)
+        
+        self._f = simplegui.create_frame(name, w, h)
+        self._f.set_canvas_background("Blue")
+        self._f.set_draw_handler(self.ev_loop)
+        self._f.add_button("Create Tileset", self._expl.create_tileset, 150)
+        self._f.add_label(' ')
+        self._f.add_button("Show Tileset", self._expl.show_tileset, 150)
+        self._f.add_button("Show Flipbook", self._expl.show_flipbook, 150)
+        self._f.add_label(' ')
+        self._f.add_button("Start Flipbook", self._expl.start_flipbook, 150)
+        
+        self._f.start()
+        
+    def ev_loop(self, canvas):
+        self._expl.update(canvas)
+
+        
+if __name__ == '__main__':
+    gapp = GenApp("Explosion Generator", WIDTH, HEIGHT)    
+
