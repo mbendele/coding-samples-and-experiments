@@ -1,0 +1,315 @@
+#!/usr/bin/env python
+# -*- coding: latin-1 -*-
+# Raycasting test for Codeskulptor based on Lode Vandevenne's tutorial
+# http://lodev.org/cgtutor/raycasting.html
+#
+# Mike Bendele - 2013
+#   Untextured version
+
+
+#/*
+#Copyright (c) 2004-2007, Lode Vandevenne
+#
+#All rights reserved.
+#
+#Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+#
+#    * Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+#    * Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+#
+#THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+#"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+#LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+#A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+#CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+#EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+#PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+#PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+#LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+#NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+#SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#*/
+
+
+
+# Automatically modified by 'cs2both.py' to run in CodeSkulptor *and* Python SimpleGUICS2Pygame.
+try:
+    import simplegui
+except:
+    import SimpleGUICS2Pygame.simpleguics2pygame as simplegui
+
+import random
+import math
+import time
+
+SCW = 800
+SCH = 600
+# render quality
+# 1 = High 8 = Low
+quality = 4
+
+worldMap = [
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,2,2,2,2,2,0,0,0,0,3,0,3,0,3,0,0,0,1],
+  [1,0,0,0,0,0,2,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,2,0,0,0,2,0,0,0,0,3,0,0,0,3,0,0,0,1],
+  [1,0,0,0,0,0,2,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,2,2,0,2,2,0,0,0,0,3,0,3,0,3,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,5,0,0,0,0,0,0,4,4,4,4,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,5,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,4,0,0,0,0,0,0,0,0,1],
+  [1,4,4,4,4,4,4,4,4,0,0,0,0,0,4,4,4,0,0,0,0,0,0,1],
+  [1,4,0,4,0,0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,4,0,0,0,0,5,0,4,0,0,0,0,0,3,0,0,0,0,0,0,0,0,1],
+  [1,4,0,4,0,0,0,0,4,0,0,0,0,0,3,0,0,0,0,0,0,0,0,1],
+  [1,4,0,4,4,4,4,4,4,0,0,0,0,0,3,3,3,0,0,0,0,0,0,1],
+  [1,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,4,4,4,4,4,4,4,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+]
+
+worldColor = [
+  ["Yellow", "Yellow"],
+  ["#B20000", "Darkred"],
+  ["#E6B800", "#997A00"],
+  ["Blue", "Darkblue"],
+  ["White", "Gray"],
+  ["Green", "Lime"],
+]
+
+step = -1
+velX = 0
+velY = 0
+rvelX = 0
+rvelY = 0
+posX = 22
+posY = 12
+dirX = -1
+dirY = 0
+planeX = 0
+planeY = 0.66
+myWalk = []
+
+def simple_walk(posX, posY):
+    walk = []
+    #return walk
+    (x, y) = (posX, posY)
+    steps = [(-1,0),(0,-1),(1,0),(0,1)]
+    laststep = [steps[0]]
+    sameStep = 0
+    while len(walk) < 20:
+        laststep.extend(steps)
+        for xy in laststep:
+            (xi,yi) = (int(x + xy[0]), int(y + xy[1]))
+            if 0 < xi < len(worldMap[0]):
+                if 0 < yi < len(worldMap):
+                    if worldMap[xi][yi] == 0:
+                        walk.append((xi + .1, yi + .1))
+                        (x, y) = (xi, yi)
+                        if laststep[0] == xy: sameStep += 1
+                        laststep = [xy]
+                        break
+        if sameStep > 2:
+            sameStep = 0
+            random.shuffle(steps)
+            laststep = [steps[0]]
+    return walk
+
+def draw_handler(canvas):
+    global dirX, dirY, posX, posY, velX, velY, rvelX, rvelY
+    global oldDirX, oldPlaneX
+    global planeX, planeY
+
+    # move forward if no wall in front of you
+    if(worldMap[int(posX + dirX * velX)][int(posY)] == False):
+        posX += dirX * velX
+    if(worldMap[int(posX)][int(posY + dirY * velY)] == False):
+        posY += dirY * velY
+
+    # both camera direction and camera plane must be rotated
+    oldDirX = dirX
+    dirX = dirX * math.cos(rvelX) - dirY * math.sin(rvelX)
+    dirY = oldDirX * math.sin(rvelY) + dirY * math.cos(rvelY)
+    oldPlaneX = planeX
+    planeX = planeX * math.cos(rvelX) - planeY * math.sin(rvelX)
+    planeY = oldPlaneX * math.sin(rvelY) + planeY * math.cos(rvelY)
+
+    canvas.draw_polygon([[0, SCH/2.0], [SCW, SCH/2.0], [SCW, SCH], [0, SCH]], 1, "Saddlebrown", "Saddlebrown")  # ! changed by OPi to run also in Python 2
+    for x in range(0, SCW, quality):
+        # calculate ray position and direction
+        cameraX = 2.0 * x / SCW - 1 # x-coordinate in camera space  # ! changed by OPi to run also in Python 2
+        rayPosX = posX
+        rayPosY = posY
+        rayDirX = dirX + planeX * cameraX
+        rayDirY = dirY + planeY * cameraX
+        if rayDirX == 0: rayDirX = 0.000001		# having some div/0 issues so added these
+        if rayDirY == 0: rayDirY = 0.000001
+
+        # which box of the map we're in
+        mapX = int(rayPosX)
+        mapY = int(rayPosY)
+
+        # length of ray from current position to next x or y-side
+        sideDistX = 0.0
+        sideDistY = 0.0
+
+        # length of ray from one x or y-side to next x or y-side
+        deltaDistX = math.sqrt(1 + float(rayDirY * rayDirY) / (rayDirX * rayDirX))  # ! changed by OPi to run also in Python 2
+        dDY = 1 + float(rayDirX * rayDirX) / (rayDirY * rayDirY)  # ! changed by OPi to run also in Python 2
+        if isinstance(dDY, float): 	# erroring out here so added this check
+            deltaDistY = math.sqrt(dDY)
+        perpWallDist = None
+
+        # what direction to step in x or y-direction (either +1 or -1)
+        stepX = None
+        stepY = None
+
+        hit = 0			# was there a wall hit?
+        side = None		# was a NS or a EW wall hit?
+
+        # calculate step and initial sideDist
+        if (rayDirX < 0):
+            stepX = -1
+            sideDistX = (rayPosX - mapX) * deltaDistX
+        else:
+            stepX = 1
+            sideDistX = (mapX + 1.0 - rayPosX) * deltaDistX
+
+        if (rayDirY < 0):
+            stepY = -1
+            sideDistY = (rayPosY - mapY) * deltaDistY
+        else:
+            stepY = 1
+            sideDistY = (mapY + 1.0 - rayPosY) * deltaDistY
+
+        # perform DDA
+        while (hit == 0):
+            # jump to next map square, OR in x-direction, OR in y-direction
+            if (sideDistX < sideDistY):
+                sideDistX += deltaDistX
+                mapX += stepX
+                side = 0
+            else:
+                sideDistY += deltaDistY
+                mapY += stepY
+                side = 1
+
+            # Check if ray has hit a wall
+            if (worldMap[mapX][mapY] > 0): hit = 1
+
+        # Calculate distance projected on camera direction (oblique distance will give fisheye effect!)
+        if (side == 0):
+            perpWallDist = math.fabs((mapX - rayPosX + (1 - stepX) / 2.0) / rayDirX)  # ! changed by OPi to run also in Python 2
+        else:
+            perpWallDist = math.fabs((mapY - rayPosY + (1 - stepY) / 2.0) / rayDirY)  # ! changed by OPi to run also in Python 2
+
+        # Calculate height of line to draw on screen
+        if perpWallDist == 0: perpWallDist = 0.000001
+        lineHeight = abs(int(float(SCH) / perpWallDist))  # ! changed by OPi to run also in Python 2
+
+        # calculate lowest and highest pixel to fill in current stripe
+        drawStart = -lineHeight / 2.0 + SCH / 2.0  # ! changed by OPi to run also in Python 2
+        if (drawStart < 0):
+            drawStart = 0
+        drawEnd = lineHeight / 2.0 + SCH / 2.0  # ! changed by OPi to run also in Python 2
+        if (drawEnd >= SCH):
+            drawEnd = SCH - 1
+
+        # draw the pixels of the stripe as a vertical line
+        wm = worldMap[mapX][mapY]
+        canvas.draw_line([x, drawStart], [x, drawEnd], quality, worldColor[wm][side])
+
+
+def key_up_handler(key):
+    global velX, velY, rvelX, rvelY
+
+    if (simplegui.KEY_MAP["down"] == key) or (simplegui.KEY_MAP["up"] == key) or (83 == key) or (87 == key):
+        velX = velY = 0
+    elif (simplegui.KEY_MAP["right"] == key) or (simplegui.KEY_MAP["left"] == key) or (65 == key) or (68 == key):
+        rvelX = rvelY = 0
+    elif (simplegui.KEY_MAP["space"] == key):
+        print("")  # ! changed by OPi to run also in Python 3
+        print(posX, posY)  # ! changed by OPi to run also in Python 3
+        print(planeX, planeY)  # ! changed by OPi to run also in Python 3
+        print(step)  # ! changed by OPi to run also in Python 3
+
+def key_handler(key):
+    global velX, velY, rvelX, rvelY
+    acc = .1
+    if step == -1:
+        # move forward if no wall in front of you
+        if (simplegui.KEY_MAP["up"] == key) or (87 == key):
+            velX += acc*1.5
+            velY += acc*1.5
+
+        # move backwards if no wall behind you
+        if (simplegui.KEY_MAP["down"] == key) or (83 == key):
+            velX -= acc
+            velY -= acc
+
+    # rotate to the right
+    if (simplegui.KEY_MAP["right"] == key) or (68 == key):
+        rvelX -= acc
+        rvelY -= acc
+
+    # rotate to the left
+    if (simplegui.KEY_MAP["left"] == key) or (65 == key):
+        rvelX += acc
+        rvelY += acc
+
+def proximity(point1, point2):
+    dx = point1[0] - point2[0]
+    dy = point1[1] - point2[1]
+    return math.sqrt(dx**2 + dy**2)
+
+def move(nextStep):
+    vx, vy = 0, 0
+    if posX > nextStep[0]:
+        vx = -.05
+    elif posX < nextStep[0]:
+        vx = .05
+    if posY > nextStep[1]:
+        vy = -.05
+    elif posY < nextStep[1]:
+        vy = .05
+    return vx, vy
+
+def do_walk():
+    global posX, posY, step, rvelX, rvelY
+    if len(myWalk) > step > -1:
+        if proximity((posX, posY), myWalk[step]) < .3:
+            (posX, posY) = myWalk[step]
+            step += 1
+        else:
+            vx, vy = move(myWalk[step])
+            posX, posY = posX + vx, posY + vy
+    else:
+        rvelX = rvelY = 0
+        walk_timer.stop()
+        step = -1
+
+def button():
+    global myWalk, step, rvelX, rvelY
+    step = 0
+    rvelX = rvelY = .005
+    myWalk = simple_walk(posX, posY)
+    print(myWalk)  # ! changed by OPi to run also in Python 3
+    walk_timer.start()
+
+# set up frame and canvas
+frame = simplegui.create_frame("Raycaster", SCW, SCH, 100)
+frame.set_draw_handler(draw_handler)
+frame.set_keydown_handler(key_handler)
+frame.set_keyup_handler(key_up_handler)
+frame.set_canvas_background("#4D4D4D")
+
+walk_timer = simplegui.create_timer(10, do_walk)
+frame.add_button("RandomWalk", button)
+frame.start()
