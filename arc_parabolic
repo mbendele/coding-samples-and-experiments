@@ -1,0 +1,278 @@
+"""
+This program just draws a parabolic arc using a technique discussed 
+in the "Pixar in a Box" videos on Khan Academy. The red circles can 
+be moved (click & drag) to change the shape of the arc, and buttons 
+on the left will increase or decrease the number of segments. 
+
+You will have to run this (by pressing the triangle icon at top left) 
+in Chrome or Firefox since Internet Explorer isn't supported.
+
+Feel free to play around with the code and save your changes (disk
+icon next to the triangle). You can't mess up this copy, but you
+will need to bookmark or copy/save the link (the URL for the page)
+--after you press the save button--if you want to find your copy in
+the future. You can share your creation by giving someone the URL.
+They can then run your program using their own browser.
+
+"""
+
+# Import the graphical user interface
+import simplegui
+
+# Constants
+FRAME_WIDTH = 700
+FRAME_HEIGHT = 500
+BUTTON_WIDTH = 200
+
+X,Y = 0,1
+COLOR_BG = "#C4C4C4"
+COLOR_CONTROL_PT = "Red"
+COLOR_CONTROL_ARM = "DarkGreen"
+COLOR_CONSTRUCT_LINES = "rgba(40,40,40,.35)"
+COLOR_CURVE = "Black"
+FILL_CONTROL_PT = COLOR_BG
+LINE_WT_CONTROL_PT = 2
+LINE_WT_CONTROL_ARM = 2
+LINE_WT_CONSTRUCT_LINES = 1
+LINE_WT_CURVE = 3
+SIZE_CONTROL_PT = 18
+SIZE_CONTROL_PT_SQ = SIZE_CONTROL_PT**2
+
+MAX_SEGS = 2**7
+MIN_SEGS = 2**1
+
+INDEX_OUT_OF_RANGE = "Index given is out of range."
+
+# Globals
+num_segments = 2**5
+
+# Initial values for control points
+control_points = ([FRAME_WIDTH*.1, FRAME_HEIGHT*.9],
+                  [FRAME_WIDTH*.4, FRAME_HEIGHT*.1],
+                  [FRAME_WIDTH*.9, FRAME_HEIGHT*.9])
+
+
+# Helper functions
+def distance_formula_sq(x1, y1, x2, y2):
+    """ 
+    Find the distance squared between two points (x1,y1) and (x2,y2)
+    Returns a float
+    
+    """
+    return (x2-x1)**2 + (y2-y1)**2
+
+ 
+# Classes
+class ControlPoint:
+    """ Control point class
+    These are the circles at the ends and middle of the curve
+    that can be selected and dragged to change the curve shape.
+    
+    Two points are needed for each ControlArm, but points may
+    be associated with more than one arm.
+    """    
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.size = SIZE_CONTROL_PT
+    
+    def get_position(self):
+        return self.x, self.y
+    
+    def set_position(self, new_x, new_y):
+        self.x = new_x
+        self.y = new_y
+    
+    def isSelected(self, mouse_pos):
+        """ Use the dist forumula to check if mouse is inside the
+        bounds of the control point. Using squared distance since
+        the square root of that value isn't needed here.
+        
+        Returns True if mouse is inside the control point
+        
+        """
+        return distance_formula_sq(mouse_pos[0], mouse_pos[1], 
+                                self.x, self.y) <= SIZE_CONTROL_PT_SQ
+    
+    def draw(self, canvas):
+        """ Draw a circle representing the control point """
+        canvas.draw_circle((self.x, self.y), SIZE_CONTROL_PT, LINE_WT_CONTROL_PT,
+                          COLOR_CONTROL_PT)
+
+        
+class Curve:
+    """ Curve arm class
+    This class manages the curve and associated construction lines 
+    and control arms.
+    
+    """
+    def __init__(self, start, mid, end):
+        # points that define control arms
+        self.start = start
+        self.middle = mid
+        self.end = end
+        
+        self.contruction_lines = []
+        self.curve = []
+        self.update(num_segments)
+        
+    def point_at_time(self, time, A, B):
+        """ 
+        If the time traveled in a straight line between two points 
+        (constant speed) is normalized so that we are at the first 
+        point when time=0 and the second when time=1, then any point,
+        P, along the line AB at time, t, can be found using the eq.
+        P = (1-t)A + Bt
+        
+        Used to build construction lines and points of curve.
+        time is in range [0,1]. A and B are two-element lists.
+        
+        Returns a two element tuple representing a point along AB at t=time 
+        
+        """
+        return (1-time)*A[X] + B[X]*time, (1-time)*A[Y] + B[Y]*time
+
+    def update(self, num_splits):
+        """ 
+        Update the construction lines and curve data 
+        
+        TODO: separate this functionality into methods
+        """
+        assert num_splits > 0, "Number of segments must be greater than 0"
+
+        A = self.start.get_position()
+        B = self.middle.get_position()
+        C = self.end.get_position()
+        
+        tmp_lines = []
+        tmp_curve = []
+        
+        # used to break control arms into num_splits number of segments
+        base = 1./num_splits
+        
+        # init time: values along control arm from 0 to 1 (inclusive)
+        t = 0
+        
+        # Algorithm from Pixar in a Box (Khan Academy) for finding
+        # 'touch point' where construction lines intersect resultant curve.
+        for n in xrange(num_splits+1):
+            Q = self.point_at_time(t, A, B)
+            R = self.point_at_time(t, B, C)
+            P = self.point_at_time(t, Q, R)
+            t += base
+            
+            tmp_lines.append( (Q, R) )
+            tmp_curve.append(P)
+            
+        self.contruction_lines = tmp_lines
+        self.curve = tmp_curve
+        
+    def draw(self, canvas):
+        # draw the construction lines
+        for x,y in self.contruction_lines:
+            canvas.draw_line(x,y, LINE_WT_CONSTRUCT_LINES, COLOR_CONSTRUCT_LINES)
+        
+        # draw the control arms
+        mid = self.middle.get_position()
+        canvas.draw_line(self.start.get_position(), mid, 
+                         LINE_WT_CONTROL_ARM, COLOR_CONTROL_ARM)
+        canvas.draw_line(self.end.get_position(), mid, 
+                         LINE_WT_CONTROL_ARM, COLOR_CONTROL_ARM)
+                    
+        # draw the curve
+        canvas.draw_polyline(self.curve, LINE_WT_CURVE, COLOR_CURVE)
+    
+    
+class Application:
+    """ Management class for objects and I/O.
+    
+    """
+    def __init__(self):
+        self.move_pt = None
+        self.cpoints = []
+        self.shapes = []
+        
+        self.initialize()
+    
+    def initialize(self):
+        # build control points
+        for x,y in control_points:
+            self.cpoints.append( ControlPoint(x,y) )
+            
+        # create default shape
+        self.shapes.append( Curve( *self.cpoints ) )
+
+    def incr_segments(self):
+        """ increase segments and store in global """
+        global num_segments
+        if num_segments < MAX_SEGS:
+            num_segments *= 2
+            self.update()
+
+    def decr_segments(self):
+        """ decrease segments and store in global """
+        global num_segments
+        if num_segments > MIN_SEGS:
+            num_segments /= 2
+            self.update()
+            
+    def click_handler(self, pos):
+        # release control point
+        self.move_pt = None
+    
+    def drag_handler(self, pos):
+        # on first value set hit or miss
+        if self.move_pt is None:
+            self.move_pt = False # change from None to miss
+            for cp in self.cpoints:
+                # if the mouse is over one of the control
+                # points then select it
+                if cp.isSelected(pos):
+                    self.move_pt = cp
+                    break
+        # control pt is already held so move it
+        elif self.move_pt:
+            self.move_pt.set_position(*pos)
+            self.update()
+        # do nothing because nothing was selected
+        else:
+            pass    
+        
+    def update(self):
+        for shape in self.shapes:
+            shape.update(num_segments)
+        
+    def draw(self, canvas):
+        """ 
+        The draw handler is called approx 60 times per second.
+        This is basically the "game loop" for simplegui programs
+        """
+        # draw the curves
+        for shape in self.shapes:
+            shape.draw(canvas)
+            
+        # draw the control points
+        for cp in self.cpoints:
+            cp.draw(canvas)
+        
+        
+# Create our app management object
+app = Application()    
+    
+# Create a frame and assign callbacks to event handlers
+frame = simplegui.create_frame("Curves", FRAME_WIDTH, FRAME_HEIGHT)
+frame.set_canvas_background(COLOR_BG)
+
+# Create buttons and register the button handlers
+frame.add_button("Increase Segments", app.incr_segments, BUTTON_WIDTH)
+frame.add_button("Decrease Segments", app.decr_segments, BUTTON_WIDTH)
+
+# Mouse handlers
+frame.set_mouseclick_handler(app.click_handler)
+frame.set_mousedrag_handler(app.drag_handler)
+
+# Register the draw handler
+frame.set_draw_handler(app.draw)
+
+# Start the frame animation
+frame.start()
