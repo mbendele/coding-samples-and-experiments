@@ -1,8 +1,8 @@
 # coding-samples-and-experiments
 
-This is a small sampling of code that I wrote, extended, ported, or just played around with while volunteering as a CTA for the Fundamentals of Computing specialization on Coursera. These programs are meant to be used with Codeskulptor and can be run using the following links (press the triangle button at top left of associated page to run). In this sampling, there are no course projects, samples of my professional work, or programs written in languages other than Python. This is only to illustrate a basic knowledge of Python and programming (and perhaps an understanding of C/C++ as a few of these are ports of other people's work).
+This is a small sampling of code that I wrote, extended, ported, or just played around with while volunteering as a CTA for the Fundamentals of Computing specialization on Coursera. These programs are meant to be used with Codeskulptor and can be run using the  links below (press the triangle button at top left of associated page to run). In this sampling, there are no course projects, samples of my professional work, or programs written in languages other than Python. This is only to illustrate a basic knowledge of Python and programming (and perhaps an understanding of C/C++ as a few of these are ports of other people's work).
 
-The arc_parabolic program is probably the cleanest (It was meant to be shared with teenage coders). Many of these were throw-away code "doodles" created for fun.
+The arc_parabolic program is probably the cleanest (It was meant to be shared with teenage coders). Many of these were one-off projects for self-improvement or throw-away "doodles" created for fun.
 
 <hr>
 <pre># CodeSkulptor runs Python programs in your browser.
